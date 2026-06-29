@@ -1,0 +1,71 @@
+*MỤC TIÊU
+- Nghiên cứu và xây dựng chương trình C++ thu nhận luồng video từ IP Camera thông qua giao thức RTSP.
+- Tìm hiểu các khái niệm và nguyên lý hoạt động của Socket, API và Modbus.
+- Hiểu mối liên hệ giữa Camera, RTSP, Socket, API và Modbus trong các hệ thống.
+- Hoàn thành chương trình demo và báo cáo kết quả nghiên cứu.
+
+*KẾ HOẠCH
+
+Ngày 1: Tìm hiểu IP Camera và RTSP
+- Cài đặt môi trường C++.
+- Cài đặt OpenCV và FFmpeg.
+- Tìm hiểu cấu trúc và nguyên lý hoạt động của IP Camera.
+- Sử dụng phần mềm SADP để dò tìm và cấu hình Camera.
+- Tìm hiểu giao thức RTSP.
+- Phân tích cấu trúc URL RTSP được cung cấp.
+Kết quả mong đợi
+- Hiểu nguyên lý hoạt động của IP Camera.
+- Hiểu quy trình truyền dữ liệu video qua RTSP.
+- Hoàn thành tài liệu tìm hiểu RTSP.
+
+---
+
+Ngày 2: Thu nhận luồng video từ Camera
+- Build và chạy chương trình C++ sử dụng OpenCV.
+- Kết nối đến IP Camera thông qua URL RTSP.
+- Thực hiện đọc frame từ Camera.
+- Hiển thị video thời gian thực bằng OpenCV.
+Kết quả mong đợi
+- Kết nối thành công tới Camera.
+- Hiển thị được luồng video thời gian thực.
+- Thu nhận được frame ảnh từ Camera.
+
+---
+
+Ngày 3: Tìm hiểu Socket và API
+- Tìm hiểu Socket Programming.
+- Tìm hiểu mô hình Client – Server.
+- Phân biệt TCP Socket và UDP Socket.
+- Tìm hiểu khái niệm API.
+- Tìm hiểu REST API và định dạng JSON.
+- Nghiên cứu các ví dụ giao tiếp dữ liệu trong hệ thống AI Vision.
+Kết quả mong đợi
+- Hiểu nguyên lý hoạt động của Socket.
+- Hiểu sự khác biệt giữa TCP và UDP.
+- Hiểu cách các hệ thống trao đổi dữ liệu thông qua API.
+
+---
+
+Ngày 4: Nghiên cứu Modbus
+- Tìm hiểu giao thức Modbus.
+- Phân biệt Modbus RTU và Modbus TCP.
+- Tìm hiểu các khái niệm Master, Slave, Coil và Register.
+- Nghiên cứu ứng dụng Modbus trong hệ thống AI Vision và PLC công nghiệp.
+Kết quả mong đợi
+- Hiểu cơ chế truyền dữ liệu của Modbus.
+- Hiểu cách AI Vision giao tiếp với PLC thông qua Modbus TCP.
+
+---
+
+Ngày 5: Hoàn thiện và báo cáo
+- Tổng hợp kiến thức đã tìm hiểu.
+- Hoàn thiện chương trình demo.
+- Kiểm tra và xử lý lỗi.
+Kết quả mong đợi
+- Chương trình demo hoạt động ổn định.
+- Hiểu mối liên hệ giữa Camera, RTSP, OpenCV, Socket, API và Modbus trong hệ thống AI Vision.
+
+Chương trình Demo mong đợi:
+- Kết nối IP Camera bằng RTSP.
+- Thu nhận frame ảnh.
+- Hiển thị video thời gian thực bằng OpenCV.
