@@ -1,0 +1,11 @@
+ Hệ thống đảm bảo khả năng realtime với latency < 30ms
+• Cấu trúc microservice kết hợp với các cấu trúc như Clean Architecture hoặc 
+Layer Architecture
+• Dễ phát triển và bảo trì (một module phát triển không làm ảnh hưởng tới 
+các module khác
+• Xây dựng cấu trúc biên: các máy chủ biên xử lý các tác vụ realtime, máy 
+chủ hệ thống xử lý các tác vụ phân tích, đánh giá
+• Ngôn ngữ phát triển C++
+• Giao tiếp giữa các module: tùy chọn đảm bảo tốc độ và độ ổn định
+• Sử dụng pipeline deepstream để tận dụng tối đa hiệu năng phần cứng của 
+Nvida
