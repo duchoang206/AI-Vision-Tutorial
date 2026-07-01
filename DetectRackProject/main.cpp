@@ -20,8 +20,8 @@ std::atomic<bool> g_running(true);
 
 // Kiểm tra xem vị trí phát hiện có nằm trong phân khu đặt rack hợp lệ hay không
 bool isValidRackArea(const cv::Rect& box) {
-    // Tránh khu vực di chuyển của AGV bên trái (x < 750) và vạch kẻ sọc phía trước (y + h > 600)
-    return box.x >= 750 && (box.y + box.height) <= 600;
+    // Tránh khu vực di chuyển của AGV bên trái (x < 700) và vạch kẻ sọc phía trước (y + h > 600)
+    return box.x >= 700 && (box.y + box.height) <= 600;
 }
 
 // Tăng cường độ tương phản cục bộ để làm nổi bật vân kim loại của rack
