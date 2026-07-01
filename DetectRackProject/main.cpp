@@ -9,36 +9,9 @@
 #include <opencv2/opencv.hpp>
 #include "CameraStream.hpp"
 #include "YOLOv8Detector.hpp"
+#include "RegionMonitor.hpp"
 
-// Cấu trúc lưu trữ thông tin vẽ hộp bằng chuột
-struct MouseCallbackParams {
-    cv::Rect box;
-    bool drawing = false;
-};
-
-// Hàm callback sự kiện chuột
-void onMouse(int event, int x, int y, int flags, void* userdata) {
-    auto* params = reinterpret_cast<MouseCallbackParams*>(userdata);
-    if (event == cv::EVENT_LBUTTONDOWN) {
-        params->drawing = true;
-        params->box = cv::Rect(x, y, 0, 0);
-    } else if (event == cv::EVENT_MOUSEMOVE && params->drawing) {
-        params->box.width = x - params->box.x;
-        params->box.height = y - params->box.y;
-    } else if (event == cv::EVENT_LBUTTONUP && params->drawing) {
-        params->drawing = false;
-        if (params->box.width < 0) {
-            params->box.x += params->box.width;
-            params->box.width = -params->box.width;
-        }
-        if (params->box.height < 0) {
-            params->box.y += params->box.height;
-            params->box.height = -params->box.height;
-        }
-    }
-}
-
-// Biến chia sẻ đa luồng giữa GUI và Inference
+// Biến chia sẻ đa luồng
 std::mutex g_mutex;
 cv::Mat g_inferenceFrame;
 bool g_newJob = false;
@@ -51,7 +24,7 @@ bool isValidRackArea(const cv::Rect& box) {
     return box.x >= 750 && (box.y + box.height) <= 600;
 }
 
-// Tăng cường độ tương phản cục bộ giúp làm nổi bật vân kim loại của rack
+// Tăng cường độ tương phản cục bộ để làm nổi bật vân kim loại của rack
 cv::Mat enhanceContrast(const cv::Mat& src) {
     if (src.empty()) return src;
     cv::Mat lab, dst;
@@ -65,7 +38,7 @@ cv::Mat enhanceContrast(const cv::Mat& src) {
     return dst;
 }
 
-// Luồng nhận diện YOLOv8 chạy ngầm trên toàn bộ khung hình (Full Frame)
+// Luồng nhận diện YOLOv8 chạy ngầm (Thread 2)
 void runInference(YOLOv8Detector* detector) {
     cv::Mat localFrame;
     while (g_running) {
@@ -80,10 +53,7 @@ void runInference(YOLOv8Detector* detector) {
         }
 
         if (process && !localFrame.empty()) {
-            // Thực hiện tăng tương phản ảnh gốc ở luồng ngầm để tránh block luồng GUI
             cv::Mat enhanced = enhanceContrast(localFrame);
-            
-            // Chạy nhận diện YOLOv8 trên toàn bộ khung hình đã tiền xử lý
             std::vector<Detection> dets = detector->detect(enhanced);
             {
                 std::lock_guard<std::mutex> lock(g_mutex);
@@ -92,6 +62,14 @@ void runInference(YOLOv8Detector* detector) {
         } else {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
+    }
+}
+
+// Hàm callback sự kiện chuột chuyển tiếp tới RegionMonitor
+void onMouse(int event, int x, int y, int flags, void* userdata) {
+    auto* monitor = reinterpret_cast<RegionMonitor*>(userdata);
+    if (monitor) {
+        monitor->handleMouseCallback(event, x, y, flags);
     }
 }
 
@@ -104,6 +82,7 @@ int main(int argc, char* argv[]) {
         modelPath = "../" + modelPath;
     }
 
+    // Khởi tạo luồng đọc camera (Thread 1)
     CameraStream camera(videoSource);
     if (!camera.start()) return -1;
 
@@ -114,22 +93,25 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
+    // Khởi động luồng xử lý AI (Thread 2)
     std::thread infThread(runInference, &detector);
-    cv::Mat frame, outputFrame;
+
+    // Cấu hình giao diện và RegionMonitor
     std::string winName = "DetectRackProject - Custom ROI Demo";
     cv::namedWindow(winName, cv::WINDOW_AUTOSIZE);
 
-    MouseCallbackParams mouseParams;
-    cv::setMouseCallback(winName, onMouse, &mouseParams);
+    RegionMonitor monitor;
+    cv::setMouseCallback(winName, onMouse, &monitor);
 
+    cv::Mat frame, outputFrame;
     double fps = 0.0;
     int frameCount = 0;
     auto lastFpsUpdate = std::chrono::steady_clock::now();
 
+    // Vòng lặp giao diện GUI chính
     while (true) {
         if (camera.retrieveFrame(frame)) {
             frame.copyTo(outputFrame);
-            cv::Rect userBox = mouseParams.box;
 
             // Gửi khung hình thô sang luồng nhận diện ngầm (cực kỳ nhanh, không block GUI)
             {
@@ -138,7 +120,7 @@ int main(int argc, char* argv[]) {
                 g_newJob = true;
             }
 
-            // Tính toán FPS của luồng hiển thị giao diện
+            // Tính toán FPS hiển thị
             frameCount++;
             auto now = std::chrono::steady_clock::now();
             std::chrono::duration<double> elapsed = now - lastFpsUpdate;
@@ -148,52 +130,43 @@ int main(int argc, char* argv[]) {
                 lastFpsUpdate = now;
             }
 
-            // Lấy danh sách kết quả nhận diện từ luồng ngầm
-            std::vector<Detection> rawDets;
+            // Lấy kết quả nhận diện mới nhất
+            std::vector<Detection> latestDets;
             {
                 std::lock_guard<std::mutex> lock(g_mutex);
-                rawDets = g_detections;
+                latestDets = g_detections;
             }
 
             // Lọc các phát hiện nằm trong vùng đặt rack hợp lệ
             std::vector<Detection> validDets;
-            for (const auto& d : rawDets) {
+            for (const auto& d : latestDets) {
                 if (isValidRackArea(d.box)) {
                     validDets.push_back(d);
                 }
             }
 
-            // Kiểm tra giao cắt giữa hộp vẽ của người dùng và các phát hiện hợp lệ
-            bool detected = false;
-            if (userBox.width > 10 && userBox.height > 10) {
-                for (const auto& d : validDets) {
-                    cv::Rect intersection = userBox & d.box;
-                    if (intersection.area() > 0 && (double)intersection.area() / d.box.area() >= 0.40) {
-                        detected = true;
-                        break;
-                    }
-                }
-
-                // Vẽ hộp của người dùng (Xanh lá nếu có rack thật, Vàng nếu không có)
-                cv::Scalar boxColor = detected ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 255, 255);
-                cv::rectangle(outputFrame, userBox, boxColor, 2);
-
-                if (detected) {
-                    std::string txt = "Phat hien duoc rack!";
-                    int baseLine = 0;
-                    cv::Size sz = cv::getTextSize(txt, cv::FONT_HERSHEY_SIMPLEX, 0.6, 2, &baseLine);
-                    cv::rectangle(outputFrame, cv::Point(userBox.x, userBox.y - sz.height - 8),
-                                  cv::Point(userBox.x + sz.width + 10, userBox.y), cv::Scalar(0, 255, 0), cv::FILLED);
-                    cv::putText(outputFrame, txt, cv::Point(userBox.x + 5, userBox.y - 4),
-                                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 0), 2, cv::LINE_AA);
-                }
+            // Kiểm tra va chạm bằng RegionMonitor và vẽ giao diện tùy chỉnh
+            bool isOccupied = monitor.checkIntersection(validDets);
+            
+            // Vẽ hộp giám sát vẽ bằng chuột (Đỏ nếu có rack, Xanh lá nếu an toàn)
+            cv::Rect roi = monitor.getROI();
+            if (roi.width > 0 && roi.height > 0) {
+                cv::Scalar boxColor = isOccupied ? cv::Scalar(0, 0, 255) : cv::Scalar(0, 255, 0);
+                cv::rectangle(outputFrame, roi, boxColor, 2);
+                
+                std::string statusText = isOccupied ? "STATUS: OCCUPIED (RACK IN ZONE)" : "STATUS: SAFE (EMPTY)";
+                cv::Scalar textColor = isOccupied ? cv::Scalar(0, 0, 255) : cv::Scalar(0, 255, 0);
+                cv::putText(outputFrame, statusText, cv::Point(30, 40), cv::FONT_HERSHEY_SIMPLEX, 0.8, textColor, 2);
+            } else {
+                cv::putText(outputFrame, "Dung chuot trai keo de ve vung can giam sat...", 
+                            cv::Point(30, 40), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 1);
             }
 
-            // Hiển thị FPS lên màn hình
+            // Hiển thị FPS
             if (fps > 0.0) {
                 std::string fpsText = cv::format("FPS: %.1f", fps);
-                cv::putText(outputFrame, fpsText, cv::Point(16, 36), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 0), 2, cv::LINE_AA);
-                cv::putText(outputFrame, fpsText, cv::Point(15, 35), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
+                cv::putText(outputFrame, fpsText, cv::Point(16, outputFrame.rows - 16), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 0), 2, cv::LINE_AA);
+                cv::putText(outputFrame, fpsText, cv::Point(15, outputFrame.rows - 17), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
             }
 
             cv::imshow(winName, outputFrame);
@@ -203,6 +176,7 @@ int main(int argc, char* argv[]) {
         if (key == 'q' || key == 'Q' || key == 27) break;
     }
 
+    // Dọn dẹp luồng
     g_running = false;
     if (infThread.joinable()) infThread.join();
 
