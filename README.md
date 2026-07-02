@@ -332,4 +332,4 @@ Nếu Dashboard báo `OFFLINE` dù server đang chạy, kiểm tra và mở Inbo
 
 ---
 
-*R-SkyView Industrial AI Vision — Edge Server v1.0.0*
+
