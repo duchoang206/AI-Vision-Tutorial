@@ -1,27 +1,41 @@
-R-SkyView DetectRack
+# R-SkyView DetectRack
+
 Hệ thống phát hiện kệ hàng (rack) công nghiệp theo thời gian thực, chạy trên kiến trúc Edge AI: xử lý AI và hình học ngay tại máy chủ biên đặt trong xưởng, sau đó phân phối dữ liệu tới Web Dashboard và PLC.
-Luồng dữ liệu tổng quát: Camera IP (RTSP) → Edge Server (C++17, YOLOv8) → WebSocket (Web Dashboard) + Modbus TCP (PLC/SCADA).
+
+**Luồng dữ liệu tổng quát:** Camera IP (RTSP) → Edge Server (C++17, YOLOv8) → WebSocket (Web Dashboard) + Modbus TCP (PLC/SCADA).
+
 ---
-Mục lục
-Yêu cầu hệ thống
-Cấu trúc mã nguồn
-Cấu hình hệ thống
-Vận hành & triển khai
-Kiến trúc hệ thống (UML)
-Ghi chú cho developer
+
+## Mục lục
+
+1. [Yêu cầu hệ thống](#1-yêu-cầu-hệ-thống)
+2. [Cấu trúc mã nguồn](#2-cấu-trúc-mã-nguồn)
+3. [Cấu hình hệ thống](#3-cấu-hình-hệ-thống)
+4. [Vận hành & triển khai](#4-vận-hành--triển-khai)
+5. [Kiến trúc hệ thống (UML)](#5-kiến-trúc-hệ-thống-uml)
+6. [Ghi chú cho developer](#6-ghi-chú-cho-developer)
+
 ---
-1. Yêu cầu hệ thống
-Môi trường:
-Windows 10/11 hoặc Linux (Ubuntu 20.04+)
-Trình biên dịch hỗ trợ chuẩn C++17
-CMake ≥ 3.10
-Thư viện phụ thuộc:
-Thư viện	Vai trò
-OpenCV 4.x	Đọc luồng camera, tăng cường ảnh (CLAHE), mã hóa JPEG
-libmodbus	Giao tiếp Modbus TCP với PLC/SCADA
-ixwebsocket	Phát luồng WebSocket đa luồng, độ trễ thấp (< 30ms)
+
+## 1. Yêu cầu hệ thống
+
+**Môi trường:**
+- Windows 10/11 hoặc Linux (Ubuntu 20.04+)
+- Trình biên dịch hỗ trợ chuẩn C++17
+- CMake ≥ 3.10
+
+**Thư viện phụ thuộc:**
+
+| Thư viện | Vai trò |
+|---|---|
+| OpenCV 4.x | Đọc luồng camera, tăng cường ảnh (CLAHE), mã hóa JPEG |
+| libmodbus | Giao tiếp Modbus TCP với PLC/SCADA |
+| ixwebsocket | Phát luồng WebSocket đa luồng, độ trễ thấp (< 30ms) |
+
 ---
-2. Cấu trúc mã nguồn
+
+## 2. Cấu trúc mã nguồn
+
 ```text
 DetectRackProject/
 ├── cmake/
@@ -40,9 +54,13 @@ DetectRackProject/
 ├── main.cpp                     # Điều phối chính, nạp cấu hình, quản lý luồng
 └── index.html                   # Web Dashboard giám sát thời gian thực
 ```
+
 ---
-3. Cấu hình hệ thống
+
+## 3. Cấu hình hệ thống
+
 Toàn bộ tham số mạng, camera và vùng giám sát được gom vào struct `SystemConfig` ở đầu `main.cpp`. Khi triển khai ở xưởng mới, chỉ cần sửa các giá trị trong struct này, không cần đụng vào logic xử lý bên dưới.
+
 ```cpp
 struct SystemConfig {
     // Mạng & giao thức
@@ -72,9 +90,13 @@ struct SystemConfig {
     };
 };
 ```
+
 ---
-4. Vận hành & triển khai
-4.1 Chạy Edge AI Server
+
+## 4. Vận hành & triển khai
+
+### 4.1 Chạy Edge AI Server
+
 ```bash
 # Cú pháp
 ./DetectRackProject "<URL_RTSP_CAMERA>" "<ĐƯỜNG_DẪN_ONNX>"
@@ -82,24 +104,36 @@ struct SystemConfig {
 # Ví dụ
 ./DetectRackProject "rtsp://192.168.1.100:554/live" "../weights/best.onnx"
 ```
+
 Nếu không truyền tham số, chương trình dùng giá trị mặc định trong `SystemConfig`.
-4.2 Triển khai Web Dashboard
+
+### 4.2 Triển khai Web Dashboard
+
 `index.html` tự lấy IP từ thanh địa chỉ trình duyệt để kết nối ngược vào WebSocket của Edge Server, nên không cần sửa mã nguồn frontend khi đổi mạng.
-Kịch bản A — Cùng mạng LAN xưởng:
-Lấy IP nội bộ của máy chạy Edge Server (ví dụ `ipconfig` → `192.168.5.101`).
-Tại thư mục chứa `index.html`, mở server tĩnh:
-```bash
+
+**Kịch bản A — Cùng mạng LAN xưởng:**
+
+1. Lấy IP nội bộ của máy chạy Edge Server (ví dụ `ipconfig` → `192.168.5.101`).
+2. Tại thư mục chứa `index.html`, mở server tĩnh:
+   ```bash
    python -m http.server 8000
    ```
-Các máy khác trong mạng truy cập: `http://192.168.5.101:8000`
-Kịch bản B — Giám sát từ xa qua Cloud:
-Đẩy `index.html` lên GitHub repository.
-Deploy tĩnh qua Vercel hoặc Netlify → nhận link công khai (ví dụ `https://detect-rack-dashboard.vercel.app`).
-Port forwarding cổng 8082 (WebSocket) trên router xưởng, trỏ về IP nội bộ của Edge Server, để trang web ngoài Internet kết nối được vào luồng dữ liệu.
+3. Các máy khác trong mạng truy cập: `http://192.168.5.101:8000`
+
+**Kịch bản B — Giám sát từ xa qua Cloud:**
+
+1. Đẩy `index.html` lên GitHub repository.
+2. Deploy tĩnh qua Vercel hoặc Netlify → nhận link công khai (ví dụ `https://detect-rack-dashboard.vercel.app`).
+3. Port forwarding cổng **8082** (WebSocket) trên router xưởng, trỏ về IP nội bộ của Edge Server, để trang web ngoài Internet kết nối được vào luồng dữ liệu.
+
 ---
-5. Kiến trúc hệ thống (UML)
-5.1 Sơ đồ thành phần (Component Diagram)
+
+## 5. Kiến trúc hệ thống (UML)
+
+### 5.1 Sơ đồ thành phần (Component Diagram)
+
 Luồng dữ liệu từ camera vật lý, qua các module xử lý trong Edge Server, đến các client tiêu thụ dữ liệu.
+
 ```mermaid
 flowchart LR
     Cam(["RTSP IP Camera"])
@@ -130,8 +164,11 @@ flowchart LR
     style Clients fill:#f4f4f4,stroke:#999999,stroke-width:1px
     style Cam fill:#fff3d6,stroke:#d6a326,stroke-width:1px
 ```
+
 Ảnh thô từ camera đi qua `CameraStream`, sau đó `YOLOv8Detector` nhận diện vật thể và chuyển tọa độ cho `RegionMonitor` tính giao cắt hình học. Kết quả tách thành hai kênh độc lập: WebSocket cho giao diện Web và Modbus TCP cho PLC.
-5.2 Sơ đồ lớp (Class Diagram)
+
+### 5.2 Sơ đồ lớp (Class Diagram)
+
 ```mermaid
 classDiagram
     class SystemConfig {
@@ -193,9 +230,13 @@ classDiagram
     YOLOv8Detector ..> Detection : tao ra
     RegionMonitor ..> Detection : danh gia va cham
 ```
+
 `SystemConfig` giữ toàn bộ tham số tĩnh; `main()` điều phối vòng đời của `CameraStream`, `YOLOv8Detector` và `RegionMonitor`; `Detection` là đối tượng dữ liệu trung gian truyền giữa các module.
-5.3 Sơ đồ trình tự khởi động & đa luồng (Sequence Diagram)
+
+### 5.3 Sơ đồ trình tự khởi động & đa luồng (Sequence Diagram)
+
 Hệ thống chạy 4 luồng song song độc lập để tránh nghẽn cổ chai giữa xử lý AI và truyền mạng.
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -227,8 +268,11 @@ sequenceDiagram
 
     Main->>Main: Vong lap GUI OpenCV cuc bo - Thread 0
 ```
+
 Bước 1–7 là khởi tạo và kiểm tra an toàn (camera, model). Sau đó `main()` đẩy 4 tác vụ vào 4 luồng CPU độc lập chạy `while(g_running)`, giúp tốc độ AI không phụ thuộc vào tốc độ truyền mạng.
-5.4 Sơ đồ trạng thái vùng giám sát (State Diagram)
+
+### 5.4 Sơ đồ trạng thái vùng giám sát (State Diagram)
+
 ```mermaid
 stateDiagram-v2
     [*] --> INITIALIZING
@@ -253,17 +297,25 @@ stateDiagram-v2
     SAFE --> [*] : Dung chuong trinh - q hoac Esc
     ALARM_OCCUPIED --> [*] : Dung chuong trinh - q hoac Esc
 ```
-Ngưỡng giao cắt được tính bằng `intersectConvexConvex` giữa đa giác ROI và bounding box. Khi tỷ lệ diện tích giao vượt 40%, hệ thống chuyển từ `SAFE` sang `ALARM_OCCUPIED`. Cơ chế event-driven đảm bảo cảnh báo chỉ phát sinh đúng 1 lần tại thời điểm chuyển trạng thái, tránh spam băng thông và CPU.
+
+Ngưỡng giao cắt được tính bằng `intersectConvexConvex` giữa đa giác ROI và bounding box. Khi tỷ lệ diện tích giao vượt **40%**, hệ thống chuyển từ `SAFE` sang `ALARM_OCCUPIED`. Cơ chế event-driven đảm bảo cảnh báo chỉ phát sinh đúng 1 lần tại thời điểm chuyển trạng thái, tránh spam băng thông và CPU.
+
 ---
-6. Ghi chú cho developer
-Lấy tọa độ ROI mới bằng chuột:
+
+## 6. Ghi chú cho developer
+
+**Lấy tọa độ ROI mới bằng chuột:**
 Chương trình có sẵn mouse listener trên cửa sổ OpenCV. Kéo chuột trái để vẽ vùng thử, tọa độ `cv::Rect(x, y, w, h)` sẽ in ra terminal — dùng giá trị này để cập nhật `roi_pts_1` / `roi_pts_2`.
-Firewall:
+
+**Firewall:**
 Nếu Dashboard báo `OFFLINE` dù server đang chạy, kiểm tra và mở Inbound Rules cho các cổng:
-`8000` — HTTP server giao diện web
-`8082` — WebSocket stream hình ảnh
-`502` — Modbus TCP tới PLC
-Bộ nhớ trình duyệt:
+- `8000` — HTTP server giao diện web
+- `8082` — WebSocket stream hình ảnh
+- `502` — Modbus TCP tới PLC
+
+**Bộ nhớ trình duyệt:**
 `index.html` gọi `URL.revokeObjectURL()` sau mỗi lần render frame mới, tránh memory leak khi Dashboard chạy liên tục 24/7.
+
 ---
-R-SkyView Industrial AI Vision — Edge Server v1.0.0
+
+*R-SkyView Industrial AI Vision — Edge Server v1.0.0*
