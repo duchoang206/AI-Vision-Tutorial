@@ -50,7 +50,7 @@ void RegionMonitor::drawUI(cv::Mat &frame,
                 cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
   }
 
-  // 2. Vẽ trạng thái vùng ROI được cấu hình bằng kéo chuột
+  // 2. Vẽ trạng thái vùng ROI được cấu hình bằng chuột.
   if (roiBox.width > 0 && roiBox.height > 0) {
     if (isOccupied) {
       cv::rectangle(frame, roiBox, cv::Scalar(0, 0, 255),
