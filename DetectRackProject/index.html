@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="vi">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,20 +8,22 @@
     <!-- Google Fonts: Outfit for sleek modern look, Rajdhani for industrial/tech feel -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap"
+        rel="stylesheet">
     <style>
         :root {
             --bg-base: #07080e;
             --panel-bg: rgba(13, 16, 27, 0.75);
             --panel-border: rgba(255, 255, 255, 0.08);
-            
+
             --text-primary: #f8fafc;
             --text-secondary: #94a3b8;
-            
+
             /* Curated industrial color tokens */
             --safe-color: #10b981;
             --safe-glow: rgba(16, 185, 129, 0.25);
-            
+
             --alarm-color: #ef4444;
             --alarm-glow: rgba(239, 68, 68, 0.35);
 
@@ -43,7 +46,7 @@
             justify-content: center;
             align-items: center;
             overflow-x: hidden;
-            background-image: 
+            background-image:
                 radial-gradient(circle at 5% 10%, rgba(6, 182, 212, 0.08) 0%, transparent 40%),
                 radial-gradient(circle at 95% 90%, rgba(16, 185, 129, 0.05) 0%, transparent 50%),
                 linear-gradient(rgba(255, 255, 255, 0.005) 1px, transparent 1px),
@@ -160,7 +163,8 @@
             z-index: 2;
         }
 
-        .corners::before, .corners::after {
+        .corners::before,
+        .corners::after {
             content: '';
             position: absolute;
             width: 16px;
@@ -195,7 +199,8 @@
             z-index: 2;
         }
 
-        .corners-secondary::before, .corners-secondary::after {
+        .corners-secondary::before,
+        .corners-secondary::after {
             content: '';
             position: absolute;
             width: 16px;
@@ -295,8 +300,13 @@
             color: var(--text-secondary);
         }
 
-        #roi1::before { content: 'MODBUS: COIL 0'; }
-        #roi2::before { content: 'MODBUS: COIL 1'; }
+        #roi1::before {
+            content: 'MODBUS: COIL 0';
+        }
+
+        #roi2::before {
+            content: 'MODBUS: COIL 1';
+        }
 
         /* SAFE STATE Styles */
         .status.safe {
@@ -355,13 +365,29 @@
 
         /* Animations */
         @keyframes pulse-dot {
-            0% { transform: scale(0.95); opacity: 0.6; }
-            100% { transform: scale(1.15); opacity: 1; }
+            0% {
+                transform: scale(0.95);
+                opacity: 0.6;
+            }
+
+            100% {
+                transform: scale(1.15);
+                opacity: 1;
+            }
         }
 
         @keyframes card-alert-pulse {
-            0%, 100% { border-color: rgba(239, 68, 68, 0.35); box-shadow: 0 0 25px rgba(239, 68, 68, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.05); }
-            50% { border-color: rgba(239, 68, 68, 0.7); box-shadow: 0 0 40px rgba(239, 68, 68, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.1); }
+
+            0%,
+            100% {
+                border-color: rgba(239, 68, 68, 0.35);
+                box-shadow: 0 0 25px rgba(239, 68, 68, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            }
+
+            50% {
+                border-color: rgba(239, 68, 68, 0.7);
+                box-shadow: 0 0 40px rgba(239, 68, 68, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            }
         }
 
         /* Loading Spinner */
@@ -396,8 +422,13 @@
         }
 
         @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
         }
 
         /* Responsive Breakpoints */
@@ -405,10 +436,12 @@
             .dashboard-content {
                 grid-template-columns: 1fr;
             }
+
             .status-box {
                 flex-direction: row;
                 height: auto;
             }
+
             .status {
                 height: 120px;
                 flex: 1;
@@ -419,12 +452,14 @@
             .status-box {
                 flex-direction: column;
             }
+
             .status {
                 height: 90px;
             }
         }
     </style>
 </head>
+
 <body>
 
     <div id="container">
@@ -434,13 +469,13 @@
                 <span class="live-dot"></span> AI LIVE MONITOR
             </span>
         </h2>
-        
+
         <div class="dashboard-content">
             <!-- Left panel: Video Stream -->
             <div class="video-wrapper">
                 <div class="corners"></div>
                 <div class="corners-secondary"></div>
-                
+
                 <!-- HUD Text Overlays -->
                 <div class="hud-overlay">CAM 01 // RTSP IN</div>
                 <div class="hud-overlay right">YOLOv8 DETECTOR // 30 FPS</div>
@@ -448,7 +483,7 @@
                 <div class="hud-overlay bottom-right">LATENCY: ~30ms</div>
 
                 <img id="videoStream" src="" alt="Đang kết nối tới luồng AI Camera..." />
-                
+
                 <div class="loader-container">
                     <div class="spinner"></div>
                     <div>AWAITING AI STREAM CONNECTION</div>
@@ -470,7 +505,7 @@
     <script>
         // Tự động lấy IP của máy chạy AI (ví dụ: 192.168.5.103) thay vì dùng localhost
         const wsUrl = "ws://" + (window.location.hostname || "192.168.5.103") + ":8082/";
-        
+
         const videoElement = document.getElementById("videoStream");
         const roi1Element = document.getElementById("roi1");
         const roi2Element = document.getElementById("roi2");
@@ -483,18 +518,18 @@
             ws = new WebSocket(wsUrl);
             ws.binaryType = "blob";
 
-            ws.onopen = function() {
+            ws.onopen = function () {
                 console.log("Đã kết nối thành công tới Server AI.");
                 loaderContainer.style.display = "none";
                 videoElement.style.opacity = "1";
             };
 
-            ws.onmessage = function(event) {
+            ws.onmessage = function (event) {
                 // Trường hợp 1: Nhận dữ liệu text (JSON trạng thái alarm)
                 if (typeof event.data === "string") {
                     try {
                         const data = JSON.parse(event.data);
-                        
+
                         // Cập nhật trạng thái ROI 1
                         if (data.roi_1_alarm) {
                             roi1Element.innerText = "ROI 1: OCCUPIED";
@@ -515,12 +550,12 @@
                     } catch (e) {
                         console.error("Lỗi parse JSON:", e);
                     }
-                } 
+                }
                 // Trường hợp 2: Nhận dữ liệu hình ảnh nhị phân (Binary)
                 else if (event.data instanceof Blob) {
                     // Tạo URL tạm thời từ dữ liệu Blob để gán vào thẻ <img>
                     const url = URL.createObjectURL(event.data);
-                    
+
                     // Giải phóng vùng nhớ cũ của ảnh trước đó để tránh rò rỉ bộ nhớ trình duyệt
                     const oldUrl = videoElement.src;
                     videoElement.src = url;
@@ -530,17 +565,17 @@
                 }
             };
 
-            ws.onclose = function() {
+            ws.onclose = function () {
                 console.log("Mất kết nối tới Server AI. Đang thử kết nối lại sau 2 giây...");
                 roi1Element.innerText = "ROI 1: DISCONNECTED";
                 roi1Element.className = "status alarm";
                 roi2Element.innerText = "ROI 2: DISCONNECTED";
                 roi2Element.className = "status alarm";
-                
+
                 loaderContainer.style.display = "flex";
                 videoElement.style.opacity = "0.05";
-                
-                // Giải phóng blob URL cũ nếu có
+
+                // Giải phóng blob URL cũ nếu tồn tại 
                 const oldUrl = videoElement.src;
                 videoElement.src = "";
                 if (oldUrl && oldUrl.startsWith("blob:")) {
@@ -550,7 +585,7 @@
                 setTimeout(connect, 2000);
             };
 
-            ws.onerror = function(error) {
+            ws.onerror = function (error) {
                 console.error("Lỗi kết nối WebSocket:", error);
             };
         }
@@ -558,4 +593,5 @@
         connect();
     </script>
 </body>
+
 </html>
