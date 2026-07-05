@@ -691,133 +691,187 @@ void modbusThreadFunc() {
 // HÀM CHÍNH (Đóng vai trò khởi tạo hệ thống và quản lý giao diện OpenCV cục bộ)
 // ============================================================================
 int main(int argc, char *argv[]) {
+  // Khởi tạo các socket và môi trường mạng cho thư viện IXWebSocket
   ix::initNetSystem();
 
+  // Khai báo biến chứa nguồn luồng video (mặc định lấy từ RTSP cấu hình)
   std::string videoSource = DEFAULT_CAMERA_RTSP;
+  // Khai báo biến chứa đường dẫn model ONNX (mặc định lấy từ cấu hình mặc định)
   std::string modelPath = DEFAULT_MODEL_PATH;
+  // Nếu người dùng truyền tham số thứ 1 qua dòng lệnh, ghi đè nguồn camera
   if (argc > 1)
     videoSource = argv[1];
+  // Nếu người dùng truyền tham số thứ 2 qua dòng lệnh, ghi đè đường dẫn model
   if (argc > 2)
     modelPath = argv[2];
 
+  // Kiểm tra nếu modelPath không tồn tại trực tiếp nhưng tồn tại ở thư mục cha (hỗ trợ chạy debug từ thư mục build)
   if (!std::filesystem::exists(modelPath) &&
       std::filesystem::exists("../" + modelPath)) {
     modelPath = "../" + modelPath;
   }
 
-  // Khởi động camera
+  // Khởi động Camera Stream lấy nguồn hình ảnh
   CameraStream camera(videoSource);
+  // Nếu camera khởi động thất bại (không kết nối được luồng RTSP)
   if (!camera.start()) {
+    // Giải phóng hệ thống mạng mạng trước khi kết thúc chương trình
     ix::uninitNetSystem();
-    return -1;
+    return -1; // Thoát với mã lỗi -1
   }
 
-  // Khởi động bộ dò tìm YOLOv8
+  // Khởi tạo bộ dò tìm đối tượng YOLOv8 với đường dẫn model, kích thước đầu vào 640x640, ngưỡng tin cậy 0.20 và ngưỡng NMS 0.45
   YOLOv8Detector detector(modelPath, cv::Size(640, 640), 0.20f, 0.45f);
+  // Thực hiện tải mô hình ONNX lên bộ nhớ RAM/VRAM
   if (!detector.loadModel()) {
+    // Nếu tải thất bại, tắt luồng camera đã chạy
     camera.stop();
+    // Giải phóng hệ thống mạng mạng
     ix::uninitNetSystem();
-    return -1;
+    return -1; // Thoát lỗi
   }
 
-  // Khởi tạo vùng giám sát cho RegionMonitor từ tọa độ ROI đã khai báo
+  // Khởi tạo vùng giám sát cho RegionMonitor của ROI 1 bằng cách mô phỏng thao tác kéo chuột
   RegionMonitor monitor1;
+  // Tính toán bounding box bao quanh tọa độ đa giác ROI 1 dạng chữ nhật cv::Rect
   cv::Rect roiRect1 = cv::boundingRect(g_pts1);
+  // Giả lập sự kiện click chuột trái tại góc trên bên trái của hình chữ nhật
   monitor1.handleMouseCallback(cv::EVENT_LBUTTONDOWN, roiRect1.x, roiRect1.y,
                                0);
+  // Giả lập sự kiện di chuyển chuột kéo thả đến góc dưới bên phải của hình chữ nhật
   monitor1.handleMouseCallback(cv::EVENT_MOUSEMOVE, roiRect1.x + roiRect1.width,
                                roiRect1.y + roiRect1.height, 0);
+  // Giả lập sự kiện nhấc chuột trái để hoàn thành tạo vùng giám sát ROI 1
   monitor1.handleMouseCallback(cv::EVENT_LBUTTONUP, roiRect1.x + roiRect1.width,
                                roiRect1.y + roiRect1.height, 0);
 
+  // Khởi tạo vùng giám sát cho RegionMonitor của ROI 2 bằng cách mô phỏng kéo chuột
   RegionMonitor monitor2;
+  // Tính toán bounding box bao quanh tọa độ đa giác ROI 2
   cv::Rect roiRect2 = cv::boundingRect(g_pts2);
+  // Giả lập click chuột trái tại góc trên bên trái
   monitor2.handleMouseCallback(cv::EVENT_LBUTTONDOWN, roiRect2.x, roiRect2.y,
                                0);
+  // Giả lập kéo chuột đến góc dưới bên phải
   monitor2.handleMouseCallback(cv::EVENT_MOUSEMOVE, roiRect2.x + roiRect2.width,
                                roiRect2.y + roiRect2.height, 0);
+  // Giả lập nhấc chuột trái
   monitor2.handleMouseCallback(cv::EVENT_LBUTTONUP, roiRect2.x + roiRect2.width,
                                roiRect2.y + roiRect2.height, 0);
 
-  // Kích hoạt các luồng chạy song song
+  // Kích hoạt luồng chạy ngầm cameraThreadFunc thực hiện chụp ảnh liên tục từ Camera
   std::thread grabThread(cameraThreadFunc, &camera);
+  // Kích hoạt luồng chạy ngầm aiCoreThreadFunc thực hiện suy diễn AI và kiểm tra ROI
   std::thread aiThread(aiCoreThreadFunc, &detector, &monitor1, &monitor2);
+  // Kích hoạt luồng chạy ngầm websocketThreadFunc thực hiện phát video/JSON alarm lên Web Dashboard
   std::thread wsThread(websocketThreadFunc);
+  // Kích hoạt luồng chạy ngầm modbusThreadFunc thực hiện truyền thông tin cảnh báo tới PLC qua Modbus TCP
   std::thread modbusThread(modbusThreadFunc);
 
-  // Mở cửa sổ OpenCV hiển thị trực tiếp cục bộ tại Server để debug nhanh
+  // Mở cửa sổ OpenCV hiển thị trực tiếp cục bộ tại Server để giám sát & debug nhanh
   std::string winName = "DetectRackProject - Live Server Debug Monitor";
+  // Tạo cửa sổ với kích thước tự động co giãn theo luồng ảnh hiển thị
   cv::namedWindow(winName, cv::WINDOW_AUTOSIZE);
 
+  // Ma trận ảnh cục bộ phục vụ hiển thị lên cửa sổ debug
   cv::Mat localFrame;
 
+  // Vòng lặp hiển thị GUI cục bộ cho đến khi biến cờ g_running bị tắt hoặc nhấn nút thoát
   while (g_running) {
+    // Biến cờ kiểm tra có khung hình GUI mới hay không
     bool hasNewGui = false;
     {
+      // Khóa mutex g_guiMutex để lấy khung hình đã qua xử lý
       std::lock_guard<std::mutex> lock(g_guiMutex);
       if (g_guiNewFrame) {
+        // Sao chép ảnh sang biến localFrame
         localFrame = g_guiFrame.clone();
+        // Reset cờ báo hiệu khung hình mới
         g_guiNewFrame = false;
         hasNewGui = true;
       }
     }
 
+    // Nếu có khung hình mới và ảnh không bị rỗng
     if (hasNewGui && !localFrame.empty()) {
+      // Biến trạng thái báo động cục bộ
       bool r1 = false, r2 = false;
       {
+        // Khóa mutex g_alarmMutex để đọc trạng thái báo động ROI
         std::lock_guard<std::mutex> lock(g_alarmMutex);
         r1 = roi_1_alarm;
         r2 = roi_2_alarm;
       }
 
-      // Vẽ đa giác và hiển thị trạng thái lên cửa sổ GUI cục bộ
+      // Xác định màu sắc của ROI 1 vẽ lên màn hình cục bộ (Đỏ khi có vi phạm, Xanh lá khi an toàn)
       cv::Scalar color1 = r1 ? cv::Scalar(0, 0, 255) : cv::Scalar(0, 255, 0);
       std::vector<std::vector<cv::Point>> polys1 = {g_pts1};
+      // Vẽ đa giác ROI 1
       cv::polylines(localFrame, polys1, true, color1, 2);
+      // Viết chữ "ROI 1" lên màn hình debug
       cv::putText(localFrame, "ROI 1", cv::Point(g_pts1[0].x, g_pts1[0].y - 8),
                   cv::FONT_HERSHEY_SIMPLEX, 0.6, color1, 2);
 
+      // Xác định màu sắc của ROI 2 vẽ lên màn hình cục bộ (Đỏ khi có vi phạm, Xanh lá khi an toàn)
       cv::Scalar color2 = r2 ? cv::Scalar(0, 0, 255) : cv::Scalar(0, 255, 0);
       std::vector<std::vector<cv::Point>> polys2 = {g_pts2};
+      // Vẽ đa giác ROI 2
       cv::polylines(localFrame, polys2, true, color2, 2);
+      // Viết chữ "ROI 2" lên màn hình debug
       cv::putText(localFrame, "ROI 2", cv::Point(g_pts2[0].x, g_pts2[0].y - 8),
                   cv::FONT_HERSHEY_SIMPLEX, 0.6, color2, 2);
 
+      // Định dạng văn bản trạng thái hiển thị của ROI 1 và ROI 2
       std::string statusText1 =
           "ROI 1: " + std::string(r1 ? "OCCUPIED" : "SAFE");
       std::string statusText2 =
           "ROI 2: " + std::string(r2 ? "OCCUPIED" : "SAFE");
+      // Viết trạng thái ROI 1 lên góc trái phía trên của màn hình hiển thị
       cv::putText(localFrame, statusText1, cv::Point(30, 40),
                   cv::FONT_HERSHEY_SIMPLEX, 0.75, color1, 2);
+      // Viết trạng thái ROI 2 lên góc trái phía trên của màn hình hiển thị
       cv::putText(localFrame, statusText2, cv::Point(30, 70),
                   cv::FONT_HERSHEY_SIMPLEX, 0.75, color2, 2);
 
+      // Hiển thị khung hình lên cửa sổ debug OpenCV cục bộ
       cv::imshow(winName, localFrame);
     }
 
+    // Đọc phím nhấn từ bàn phím với thời gian chờ phản hồi là 1ms
     char key = static_cast<char>(cv::waitKey(1));
+    // Nếu nhấn phím 'q', 'Q' hoặc ESC (mã ASCII 27) thì thực hiện tắt hệ thống
     if (key == 'q' || key == 'Q' || key == 27) {
-      g_running = false;
-      break;
+      g_running = false; // Tắt cờ chạy để các luồng thoát vòng lặp
+      break;             // Thoát vòng lặp hiển thị GUI
     }
   }
 
+  // Đảm bảo cờ running được gán về false
   g_running = false;
 
+  // Tiến hành dọn dẹp hệ thống khi tắt ứng dụng
   std::cout << "[Shutdown] Đang dừng tất cả các luồng..." << std::endl;
+  // Chờ luồng camera dừng hẳn và thu hồi tài nguyên luồng
   if (grabThread.joinable())
     grabThread.join();
+  // Chờ luồng AI dừng hẳn và thu hồi tài nguyên
   if (aiThread.joinable())
     aiThread.join();
+  // Chờ luồng WebSocket dừng hẳn và thu hồi tài nguyên
   if (wsThread.joinable())
     wsThread.join();
+  // Chờ luồng Modbus dừng hẳn và thu hồi tài nguyên
   if (modbusThread.joinable())
     modbusThread.join();
 
+  // Dừng camera stream
   camera.stop();
+  // Giải phóng tất cả các cửa sổ hiển thị đồ họa OpenCV đã tạo
   cv::destroyAllWindows();
+  // Giải phóng hệ thống mạng mạng cho thư viện IXWebSocket
   ix::uninitNetSystem();
 
+  // In log hoàn thành và trả về 0 để thoát chương trình thành công
   std::cout << "[Shutdown] Hoàn thành dọn dẹp hệ thống." << std::endl;
   return 0;
 }
