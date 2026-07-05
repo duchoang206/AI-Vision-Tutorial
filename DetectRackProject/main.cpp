@@ -1,25 +1,45 @@
+// Thư viện xử lý luồng luân chuyển hình ảnh từ Camera (lấy khung hình)
 #include "CameraStream.hpp"
+// Thư viện quản lý việc giám sát khu vực ROI (Region of Interest)
 #include "RegionMonitor.hpp"
+// Thư viện tích hợp mô hình YOLOv8 để phát hiện đối tượng (Rack)
 #include "YOLOv8Detector.hpp"
+// Thư viện cung cấp các biến nguyên tử (atomic) hỗ trợ đồng bộ hóa đa luồng an toàn
 #include <atomic>
+// Thư viện đo thời gian, tính toán FPS và khoảng thời gian trễ (delay)
 #include <chrono>
+// Thư viện thao tác với hệ thống tệp tin (kiểm tra file weights sự tồn tại của mô hình)
 #include <filesystem>
-#include <iostream>
-#include <mutex>
-#include <opencv2/opencv.hpp>
-#include <set>
-#include <string>
-#include <thread>
-#include <vector>
+// Thư viện định dạng dữ liệu luồng vào/ra (định dạng thời gian)
 #include <iomanip>
+// Thư viện nhập xuất chuẩn của C++ (in log ra console)
+#include <iostream>
+// Thư viện cung cấp khóa loại trừ tương hỗ (mutex) để đồng bộ hóa tài nguyên dùng chung giữa các luồng
+#include <mutex>
+// Thư viện xử lý ảnh chính OpenCV (vẽ hình, đọc luồng, ma trận ảnh cv::Mat)
+#include <opencv2/opencv.hpp>
+// Thư viện tập hợp (set) quản lý các kết nối duy nhất (các Web Clients kết nối)
+#include <set>
+// Thư viện luồng chuỗi (stringstream) hỗ trợ ghép nối định dạng chuỗi
 #include <sstream>
+// Thư viện chuỗi ký tự chuẩn C++
+#include <string>
+// Thư viện lập trình đa luồng (std::thread, std::this_thread)
+#include <thread>
+// Thư viện mảng động (vector) của C++
+#include <vector>
 
-// Networking Headers
+// Các thư viện phục vụ truyền thông mạng (Networking Headers)
+// Khởi tạo và giải phóng hệ thống mạng mạng cho thư viện IXWebSocket
 #include <ixwebsocket/IXNetSystem.h>
+// Khởi tạo các đối tượng Client kết nối WebSocket
 #include <ixwebsocket/IXWebSocket.h>
+// Khởi tạo WebSocket Server để truyền phát dữ liệu hình ảnh/trạng thái lên Web Dashboard
 #include <ixwebsocket/IXWebSocketServer.h>
+// Thư viện giao thức truyền thông Modbus TCP kết nối với PLC/AGV
 #include <modbus/modbus.h>
 
+// Nếu hệ thống chạy trên hệ điều hành Windows, nạp thư viện socket Winsock2
 #ifdef _WIN32
 #include <winsock2.h>
 #endif
@@ -28,52 +48,66 @@
 // KHU VỰC CẤU HÌNH HỆ THỐNG - DÀNH CHO KHÁCH HÀNG SỬA IP / CỔNG MẠNG
 // ============================================================================
 
-// 1. Địa chỉ luồng RTSP của Camera AI (Khách hàng sửa địa chỉ IP 192.168.5.201
-// tại đây nếu đổi camera)
+// 1. Đường dẫn RTSP mặc định của Camera AI (Địa chỉ IP camera là 192.168.5.201, cổng 554, luồng chính subtype=0)
 const std::string DEFAULT_CAMERA_RTSP =
     "rtsp://admin:rtc%402025@192.168.5.201:554/cam/"
     "realmonitor?channel=1&subtype=0";
 
-// 2. Đường dẫn đến file weights mô hình YOLOv8 (.onnx)
+// 2. Đường dẫn mặc định đến file weights (trọng số) ONNX của mô hình YOLOv8 đã train
 const std::string DEFAULT_MODEL_PATH = "weights/best.onnx";
 
-// 3. Cấu hình cổng kết nối mạng LAN cho thiết bị ngoại vi
-const int MODBUS_PORT =
-    502; // Cổng Modbus TCP gửi dữ liệu cho PLC/AGV (Mặc định: 502)
-const int WEBSOCKET_PORT =
-    8082; // Cổng truyền phát video và alarm cho Web Dashboard (Mặc định: 8082)
+// 3. Khai báo cổng kết nối mạng LAN cho thiết bị ngoại vi
+// Cổng Modbus TCP mặc định (502) dùng để truyền trạng thái cảnh báo đến PLC hoặc AGV
+const int MODBUS_PORT = 502; 
+// Cổng WebSocket Server mặc định (8082) dùng để truyền video và alarm dạng JSON lên giao diện Web
+const int WEBSOCKET_PORT = 8082; 
 
-// 4. Tọa độ các đa giác ROI (Hình bình hành giám sát khu vực đặt Rack)
+// 4. Khai báo tọa độ các điểm đa giác cho vùng ROI 1 (Hình bình hành giám sát khu vực đặt Rack số 1)
 std::vector<cv::Point> g_pts1 = {cv::Point(1168, 391), cv::Point(1296, 344),
                                  cv::Point(1444, 405), cv::Point(1300, 460)};
+// Khai báo tọa độ các điểm đa giác cho vùng ROI 2 (Hình bình hành giám sát khu vực đặt Rack số 2)
 std::vector<cv::Point> g_pts2 = {cv::Point(1476, 427), cv::Point(1655, 512),
                                  cv::Point(1520, 575), cv::Point(1341, 490)};
 
 // ============================================================================
 
 // --- Trạng thái vi phạm ROI toàn cục ---
+// Mutex bảo vệ truy cập đồng thời vào các biến trạng thái báo động ROI
 std::mutex g_alarmMutex;
-bool roi_1_alarm = false;
+// Biến cờ (Flag) báo động vùng ROI 1: true nếu có Rack bên trong, false nếu an toàn/trống
+bool roi_1_alarm = false; 
+// Biến cờ (Flag) báo động vùng ROI 2: true nếu có Rack bên trong, false nếu an toàn/trống
 bool roi_2_alarm = false;
 
 // --- Lịch sử phát hiện Rack ---
+// Mutex bảo vệ truy cập đồng thời vào danh sách lịch sử phát hiện Rack
 std::mutex g_historyMutex;
+// Danh sách (vector) lưu trữ lịch sử các sự kiện Rack đi vào vùng ROI (định dạng string: ROI_ID | Timestamp)
 std::vector<std::string> g_entryHistory;
 
 // --- Vùng đệm chia sẻ (Camera -> AI & WS) ---
+// Mutex bảo vệ tài nguyên ảnh gốc nhận được từ luồng camera sang luồng xử lý AI và WebSocket
 std::mutex g_bufferMutex;
+// Biến lưu trữ khung hình ảnh gốc dùng chung giữa các luồng
 cv::Mat g_sharedFrame;
-bool g_hasNewFrame = false;
+// Cờ báo hiệu đã nhận được khung hình mới từ luồng Camera, luồng AI cần lấy ra để xử lý
+bool g_hasNewFrame = false; 
 
 // --- Vùng đệm hiển thị GUI OpenCV cục bộ ---
+// Mutex bảo vệ việc truyền ảnh đã xử lý vẽ ROI từ luồng AI sang luồng giao diện GUI OpenCV cục bộ
 std::mutex g_guiMutex;
+// Biến lưu trữ khung hình đã qua xử lý để hiển thị trên màn hình OpenCV cục bộ
 cv::Mat g_guiFrame;
+// Cờ báo hiệu có khung hình mới cho việc hiển thị giao diện đồ họa cục bộ
 bool g_guiNewFrame = false;
 
 // --- Quản lý các kết nối Web Clients ---
+// Mutex bảo vệ danh sách các client kết nối qua WebSocket
 std::mutex g_wsClientsMutex;
+// Tập hợp (set) lưu trữ các phiên kết nối WebSocket đang hoạt động để broadcast dữ liệu
 std::set<std::shared_ptr<ix::WebSocket>> g_wsClients;
 
+// Biến cờ nguyên tử kiểm soát vòng lặp chạy của toàn bộ ứng dụng (chạy khi true, dừng hệ thống khi set false)
 std::atomic<bool> g_running(true);
 
 // Hàm lấy mốc thời gian hiện tại chính xác đến từng giây
