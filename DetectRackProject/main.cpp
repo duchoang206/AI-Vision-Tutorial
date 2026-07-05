@@ -371,61 +371,86 @@ void aiCoreThreadFunc(YOLOv8Detector *detector, RegionMonitor *monitor1,
 }
 
 // ==========================================
-// LUỒNG 3: WEBSOCKET STREAMING (Phát 30 FPS lên Web Dashboard)
+// LUỒNG 3: WEBSOCKET STREAMING (Phát dữ liệu JSON và ảnh 30 FPS lên Web Dashboard)
 // ==========================================
 void websocketThreadFunc() {
+  // Khởi tạo đối tượng WebSocket Server lắng nghe tại cổng WEBSOCKET_PORT (8082) và IP "0.0.0.0" (chấp nhận mọi card mạng)
   ix::WebSocketServer server(WEBSOCKET_PORT, "0.0.0.0");
 
+  // Thiết lập hàm Callback khi có một Web Client mới thực hiện kết nối vào Server
   server.setOnConnectionCallback(
       [](std::weak_ptr<ix::WebSocket> webSocket,
          std::shared_ptr<ix::ConnectionState> connectionState) {
+        // Chuyển đổi con trỏ yếu (weak_ptr) thành con trỏ chia sẻ (shared_ptr) để làm việc an toàn
         auto ws = webSocket.lock();
         if (ws) {
           {
+            // Khóa danh sách Clients bằng mutex g_wsClientsMutex
             std::lock_guard<std::mutex> lock(g_wsClientsMutex);
+            // Thêm phiên kết nối WebSocket vừa thiết lập vào tập hợp quản lý
             g_wsClients.insert(ws);
           }
+          // In log ra console về thông tin IP của client vừa kết nối thành công
           std::cout << "[WebSocket] Thiết bị kết nối: "
                     << connectionState->getRemoteIp() << std::endl;
 
+          // Thiết lập Callback xử lý khi nhận được tin nhắn hoặc thay đổi trạng thái từ client này
           ws->setOnMessageCallback([webSocket](
                                        const ix::WebSocketMessagePtr &msg) {
+            // Nếu là thông điệp đóng kết nối (Close) hoặc xảy ra lỗi kết nối (Error)
             if (msg->type == ix::WebSocketMessageType::Close ||
                 msg->type == ix::WebSocketMessageType::Error) {
+              // Khóa danh sách Clients
               std::lock_guard<std::mutex> lock(g_wsClientsMutex);
+              // Lấy con trỏ kết nối
               auto wsShared = webSocket.lock();
               if (wsShared)
+                // Xóa kết nối này khỏi tập hợp quản lý để tránh gửi lỗi
                 g_wsClients.erase(wsShared);
+              // In log thông báo thiết bị ngắt kết nối
               std::cout << "[WebSocket] Thiết bị ngắt kết nối." << std::endl;
             }
           });
         }
       });
 
+  // Server thực hiện lắng nghe trên cổng đã cấu hình
   auto res = server.listen();
+  // Nếu lắng nghe thất bại (ví dụ trùng cổng mạng)
   if (!res.first) {
+    // In thông báo lỗi ra luồng cerr và kết thúc luồng
     std::cerr << "[WebSocket] Lỗi khởi động server: " << res.second
               << std::endl;
     return;
   }
 
+  // Khởi động WebSocket Server (chạy ngầm xử lý các kết nối)
   server.start();
 
+  // Biến đo lường và theo dõi FPS truyền phát video thực tế lên Web
   double streamFps = 0.0;
+  // Biến đếm số lượng khung hình đã truyền trong chu kỳ đo
   int frameCount = 0;
+  // Mốc thời gian cập nhật FPS lần cuối
   auto lastFpsUpdate = std::chrono::steady_clock::now();
 
+  // Vòng lặp truyền phát dữ liệu hoạt động cho đến khi tắt ứng dụng
   while (g_running) {
+    // Biến lưu trạng thái cảnh báo của ROI1 và ROI2 cục bộ trong luồng này
     bool r1 = false, r2 = false;
     {
+      // Khóa mutex báo động toàn cục để lấy dữ liệu trạng thái mới nhất
       std::lock_guard<std::mutex> lock(g_alarmMutex);
       r1 = roi_1_alarm;
       r2 = roi_2_alarm;
     }
 
+    // Biến chuỗi lưu trữ dữ liệu JSON lịch sử đỗ Rack
     std::string historyJson = "";
     {
+      // Khóa mutex lịch sử để sao chép thông tin an toàn
       std::lock_guard<std::mutex> lock(g_historyMutex);
+      // Lặp qua toàn bộ danh sách lịch sử để ghép chuỗi định dạng mảng JSON
       for (size_t i = 0; i < g_entryHistory.size(); ++i) {
         historyJson += "\"" + g_entryHistory[i] + "\"";
         if (i + 1 < g_entryHistory.size()) {
@@ -434,80 +459,110 @@ void websocketThreadFunc() {
       }
     }
 
+    // Tạo chuỗi JSON hoàn chỉnh chứa trạng thái cảnh báo của 2 ROI và danh sách lịch sử
     std::string jsonStr =
         "{\"roi_1_alarm\": " + std::string(r1 ? "true" : "false") +
         ", \"roi_2_alarm\": " + std::string(r2 ? "true" : "false") +
         ", \"history\": [" + historyJson + "]}";
 
+    // Khởi tạo ma trận ảnh cục bộ để chuẩn bị nén và truyền đi
     cv::Mat localFrame;
     {
+      // Khóa mutex bộ đệm dùng chung để lấy khung hình camera mới nhất
       std::lock_guard<std::mutex> lock(g_bufferMutex);
       if (!g_sharedFrame.empty())
         localFrame = g_sharedFrame.clone();
     }
 
+    // Vector chứa byte dữ liệu ảnh sau khi nén JPEG
     std::vector<uchar> localJpeg;
+    // Biến cờ xác nhận có ảnh hợp lệ để truyền phát hay không
     bool hasFrame = false;
 
+    // Nếu khung hình cục bộ không rỗng
     if (!localFrame.empty()) {
-      // Tính toán FPS của luồng
+      // Tăng biến đếm số khung hình
       frameCount++;
+      // Lấy thời gian hiện tại để tính FPS
       auto now = std::chrono::steady_clock::now();
+      // Tính toán khoảng thời gian trôi qua từ lần cập nhật FPS trước đó
       std::chrono::duration<double> elapsed = now - lastFpsUpdate;
+      // Cứ mỗi 0.5 giây thực hiện cập nhật giá trị FPS một lần
       if (elapsed.count() >= 0.5) {
         streamFps = frameCount / elapsed.count();
         frameCount = 0;
         lastFpsUpdate = now;
       }
 
-      // Vẽ đa giác ROI lên ảnh truyền phát
+      // Xác định màu sắc cho ROI 1 vẽ lên màn hình (Đỏ nếu có vi phạm/Occupied, Xanh lá nếu an toàn/Safe)
       cv::Scalar color1 = r1 ? cv::Scalar(0, 0, 255) : cv::Scalar(0, 255, 0);
+      // Đóng gói danh sách điểm của ROI 1 vào vector để vẽ đa giác
       std::vector<std::vector<cv::Point>> polys1 = {g_pts1};
+      // Vẽ đường đa giác khép kín của ROI 1 lên khung hình với độ dày nét vẽ là 2
       cv::polylines(localFrame, polys1, true, color1, 2);
+      // Viết chữ "ROI 1" lên góc trên của đa giác
       cv::putText(localFrame, "ROI 1", cv::Point(g_pts1[0].x, g_pts1[0].y - 8),
                   cv::FONT_HERSHEY_SIMPLEX, 0.6, color1, 2);
 
+      // Xác định màu sắc cho ROI 2 vẽ lên màn hình (Đỏ nếu Occupied, Xanh lá nếu Safe)
       cv::Scalar color2 = r2 ? cv::Scalar(0, 0, 255) : cv::Scalar(0, 255, 0);
+      // Đóng gói danh sách điểm của ROI 2
       std::vector<std::vector<cv::Point>> polys2 = {g_pts2};
+      // Vẽ đường đa giác khép kín của ROI 2 lên khung hình
       cv::polylines(localFrame, polys2, true, color2, 2);
+      // Viết chữ "ROI 2" lên góc trên của đa giác
       cv::putText(localFrame, "ROI 2", cv::Point(g_pts2[0].x, g_pts2[0].y - 8),
                   cv::FONT_HERSHEY_SIMPLEX, 0.6, color2, 2);
 
-      // Trạng thái góc trái
+      // Định dạng văn bản trạng thái hiển thị góc trái phía trên ảnh
       std::string statusText1 =
           "ROI 1: " + std::string(r1 ? "OCCUPIED" : "SAFE");
       std::string statusText2 =
           "ROI 2: " + std::string(r2 ? "OCCUPIED" : "SAFE");
+      // Viết trạng thái ROI 1 lên khung hình ở tọa độ (30, 40)
       cv::putText(localFrame, statusText1, cv::Point(30, 40),
                   cv::FONT_HERSHEY_SIMPLEX, 0.75, color1, 2);
+      // Viết trạng thái ROI 2 lên khung hình ở tọa độ (30, 70)
       cv::putText(localFrame, statusText2, cv::Point(30, 70),
                   cv::FONT_HERSHEY_SIMPLEX, 0.75, color2, 2);
 
-      // Hiển thị FPS
+      // Nếu chỉ số FPS đo được hợp lệ (> 0)
       if (streamFps > 0.0) {
+        // Định dạng chuỗi văn bản hiển thị FPS
         std::string fpsText = cv::format("FPS: %.1f", streamFps);
+        // Vẽ bóng chữ màu đen ở phía dưới góc trái để tăng độ tương phản dễ nhìn
         cv::putText(localFrame, fpsText, cv::Point(16, localFrame.rows - 16),
                     cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 0), 2,
                     cv::LINE_AA);
+        // Vẽ chữ chính màu trắng đè lên bóng chữ
         cv::putText(localFrame, fpsText, cv::Point(15, localFrame.rows - 17),
                     cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 1,
                     cv::LINE_AA);
       }
 
-      // Nén ảnh chất lượng cao 960x540
+      // Khởi tạo ma trận ảnh để resize (giảm độ phân giải truyền lên web để tiết kiệm băng thông)
       cv::Mat webFrame;
+      // Thu nhỏ kích thước ảnh về 960x540 (định dạng HD tỷ lệ 16:9)
       cv::resize(localFrame, webFrame, cv::Size(960, 540));
+      // Thiết lập chất lượng nén JPEG là 70% để tối ưu hóa tốc độ tải và chất lượng hiển thị
       std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, 70};
+      // Nén ảnh webFrame thành chuỗi byte định dạng JPEG lưu vào localJpeg
       cv::imencode(".jpg", webFrame, localJpeg, params);
+      // Đánh dấu đã nén ảnh thành công để gửi đi
       hasFrame = true;
     }
 
-    // Broadcast tới các client
+    // Broadcast truyền thông điệp tới toàn bộ Web Clients đang kết nối
     {
+      // Khóa danh sách các client kết nối
       std::lock_guard<std::mutex> lock(g_wsClientsMutex);
+      // Nếu có ít nhất một client đang kết nối
       if (!g_wsClients.empty()) {
+        // Lặp qua từng client hoạt động để gửi dữ liệu
         for (auto &ws : g_wsClients) {
+          // Gửi chuỗi dữ liệu trạng thái JSON text
           ws->sendText(jsonStr);
+          // Gửi dữ liệu nhị phân (binary) của khung hình JPEG nếu có
           if (hasFrame && !localJpeg.empty()) {
             std::string binaryData(reinterpret_cast<char *>(localJpeg.data()),
                                    localJpeg.size());
@@ -517,9 +572,11 @@ void websocketThreadFunc() {
       }
     }
 
+    // Tạm dừng luồng 33ms để giới hạn tốc độ truyền phát ở mức ~30 khung hình/giây (30 FPS), tiết kiệm tài nguyên
     std::this_thread::sleep_for(std::chrono::milliseconds(33)); // ~30 FPS
   }
 
+  // Khi ứng dụng thoát vòng lặp, ra lệnh dừng WebSocket Server để giải phóng cổng kết nối
   server.stop();
 }
 
