@@ -584,69 +584,106 @@ void websocketThreadFunc() {
 // LUỒNG 4: MODBUS TCP SERVER (Gửi cảnh báo sang PLC)
 // ==========================================
 void modbusThreadFunc() {
+  // Tạo thực thể Modbus TCP Server lắng nghe trên mọi địa chỉ IP ("0.0.0.0") tại cổng MODBUS_PORT (502)
   modbus_t *ctx = modbus_new_tcp("0.0.0.0", MODBUS_PORT);
+  // Nếu không thể khởi tạo đối tượng Modbus TCP context (ví dụ lỗi thiếu bộ nhớ)
   if (ctx == NULL) {
+    // In thông báo lỗi ra luồng cerr và kết thúc luồng
     std::cerr << "[Modbus] Không thể tạo Modbus TCP context." << std::endl;
     return;
   }
 
+  // Cấp phát vùng nhớ ánh xạ thanh ghi/bits cho Modbus Server
+  // Số lượng Coils (bits): 2, Discrete Inputs: 0, Holding Registers: 0, Input Registers: 0
   modbus_mapping_t *mb_mapping = modbus_mapping_new(2, 0, 0, 0);
+  // Nếu lỗi cấp phát vùng nhớ ánh xạ
   if (mb_mapping == NULL) {
+    // In thông báo lỗi ra luồng cerr
     std::cerr << "[Modbus] Lỗi cấp phát bộ nhớ Modbus." << std::endl;
+    // Giải phóng cấu trúc dữ liệu Modbus TCP context đã tạo
     modbus_free(ctx);
     return;
   }
 
+  // Khởi tạo socket lắng nghe kết nối Modbus TCP, cho phép hàng đợi kết nối tối đa là 1 thiết bị
   int server_socket = modbus_tcp_listen(ctx, 1);
+  // Nếu lắng nghe cổng mạng thất bại (ví dụ cổng 502 đã bị phần mềm khác sử dụng)
   if (server_socket == -1) {
+    // In thông báo lỗi kèm thông tin cổng mạng ra luồng cerr
     std::cerr << "[Modbus] Lỗi lắng nghe cổng " << MODBUS_PORT << std::endl;
+    // Giải phóng vùng nhớ ánh xạ Modbus
     modbus_mapping_free(mb_mapping);
+    // Giải phóng cấu trúc dữ liệu Modbus TCP context
     modbus_free(ctx);
     return;
   }
 
+  // In thông báo sẵn sàng lên màn hình console
   std::cout << "[Modbus] Server đang lắng nghe ở cổng " << MODBUS_PORT << "..."
             << std::endl;
 
+  // Vòng lặp nhận kết nối từ các thiết bị điều khiển (PLC/AGV) cho đến khi tắt ứng dụng
   while (g_running) {
+    // Chờ và chấp nhận kết nối từ thiết bị điều khiển (client)
     int client_socket = modbus_tcp_accept(ctx, &server_socket);
+    // Nếu kết nối bị lỗi hoặc ngắt quãng
     if (client_socket == -1) {
+      // Nếu ứng dụng đang trong quá trình tắt, thoát vòng lặp ngay lập tức
       if (!g_running)
         break;
+      // Tạm dừng 100ms trước khi thử kết nối lại để tránh lặp lỗi quá nhanh
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       continue;
     }
 
+    // In thông báo thiết bị điều khiển (ví dụ PLC) đã kết nối thành công
     std::cout << "[Modbus] Đã kết nối thiết bị điều khiển." << std::endl;
 
+    // Mảng chứa dữ liệu truy vấn nhận được từ client (ADU)
     uint8_t query[MODBUS_TCP_MAX_ADU_LENGTH];
+    // Vòng lặp giao tiếp trao đổi dữ liệu với client vừa kết nối
     while (g_running) {
+      // Thiết lập thời gian chờ phản hồi tối đa (timeout) cho socket là 200 miligiây (200000 microgiây)
       modbus_set_response_timeout(ctx, 0, 200000); // 200ms
 
+      // Đọc gói tin truy vấn Modbus gửi từ Client
       int rc = modbus_receive(ctx, query);
+      // Nếu nhận được gói tin truy vấn hợp lệ (kích thước byte > 0)
       if (rc > 0) {
         {
+          // Khóa mutex g_alarmMutex để đọc dữ liệu báo động của 2 ROI một cách an toàn đồng bộ
           std::lock_guard<std::mutex> lock(g_alarmMutex);
+          // Gán giá trị bit đầu tiên (Coil index 0) đại diện cho ROI 1 Alarm
           mb_mapping->tab_bits[0] = roi_1_alarm ? 1 : 0;
+          // Gán giá trị bit thứ hai (Coil index 1) đại diện cho ROI 2 Alarm
           mb_mapping->tab_bits[1] = roi_2_alarm ? 1 : 0;
         }
+        // Gửi phản hồi chuẩn Modbus TCP trở lại cho client dựa trên gói tin truy vấn và ánh xạ dữ liệu vừa cập nhật
         modbus_reply(ctx, query, rc, mb_mapping);
       } else if (rc == -1) {
+        // Nếu ngắt kết nối (hoặc timeout/lỗi kết nối), thoát vòng lặp giao tiếp để chờ thiết bị khác kết nối lại
         break;
       }
     }
+    // In thông báo khi thiết bị điều khiển ngắt kết nối
     std::cout << "[Modbus] Thiết bị điều khiển ngắt kết nối." << std::endl;
+    // Đóng socket kết nối với client hiện tại
     modbus_close(ctx);
   }
 
+  // Giải phóng tài nguyên socket lắng nghe của server nếu còn mở
   if (server_socket != -1) {
 #ifdef _WIN32
+    // Đóng socket trên Windows sử dụng closesocket
     closesocket(server_socket);
 #else
+    // Đóng socket trên hệ thống UNIX sử dụng close
     close(server_socket);
 #endif
   }
+  // Giải phóng vùng nhớ ánh xạ Modbus mapping
   modbus_mapping_free(mb_mapping);
+  // Giải phóng cấu trúc dữ liệu Modbus TCP context
   modbus_free(ctx);
 }
 
