@@ -110,86 +110,124 @@ std::set<std::shared_ptr<ix::WebSocket>> g_wsClients;
 // Biến cờ nguyên tử kiểm soát vòng lặp chạy của toàn bộ ứng dụng (chạy khi true, dừng hệ thống khi set false)
 std::atomic<bool> g_running(true);
 
-// Hàm lấy mốc thời gian hiện tại chính xác đến từng giây
+// Hàm lấy mốc thời gian hiện tại dưới dạng chuỗi kí tự chính xác đến từng giây
 std::string getCurrentTimestamp() {
+  // Lấy thời điểm hiện tại từ đồng hồ hệ thống (system_clock)
   auto now = std::chrono::system_clock::now();
+  // Chuyển đổi thời điểm hiện tại sang kiểu thời gian truyền thống time_t của C
   auto in_time_t = std::chrono::system_clock::to_time_t(now);
+  // Khởi tạo đối tượng stream để định dạng chuỗi
   std::stringstream ss;
 #ifdef _WIN32
+  // Sử dụng cấu trúc lưu trữ thông tin thời gian biểu (tm) trong Windows
   struct tm buf;
+  // Sử dụng hàm an toàn localtime_s của Windows để chuyển đổi time_t sang cấu trúc tm cục bộ
   localtime_s(&buf, &in_time_t);
+  // Định dạng thời gian dạng YYYY-MM-DD HH:MM:SS và ghi vào luồng stream
   ss << std::put_time(&buf, "%Y-%m-%d %H:%M:%S");
 #else
+  // Sử dụng cấu trúc lưu trữ thông tin thời gian biểu (tm) trong Linux/macOS
   struct tm buf;
+  // Sử dụng hàm an toàn localtime_r của Linux để chuyển đổi time_t sang cấu trúc tm cục bộ
   localtime_r(&in_time_t, &buf);
+  // Định dạng thời gian dạng YYYY-MM-DD HH:MM:SS và ghi vào luồng stream
   ss << std::put_time(&buf, "%Y-%m-%d %H:%M:%S");
 #endif
+  // Trả về chuỗi kết quả thu được từ luồng stream
   return ss.str();
 }
 
-// Lọc các vùng phát hiện rack hợp lệ (tránh AGV di chuyển ở phần ngoài)
+// Hàm lọc và kiểm tra xem vị trí Box phát hiện bởi YOLO có nằm trong khu vực giám sát thực tế hay không
+// (Tránh nhận diện nhầm các xe AGV di chuyển ngoài khu vực đỗ Rack)
 bool isValidRackArea(const cv::Rect &box) {
+  // Điều kiện 1: Tọa độ x của box phải lớn hơn hoặc bằng 700 (nằm bên phải)
+  // Điều kiện 2: Biên dưới cùng của box (y + height) phải nhỏ hơn hoặc bằng 600
   return box.x >= 700 && (box.y + box.height) <= 600;
 }
 
-// Cải thiện độ tương phản ảnh camera (CLAHE)
+// Hàm cải thiện độ tương phản của khung hình camera bằng thuật toán CLAHE (tối ưu khi ánh sáng yếu/lóa)
 cv::Mat enhanceContrast(const cv::Mat &src) {
+  // Nếu ảnh đầu vào rỗng (không hợp lệ), trả về chính nó
   if (src.empty())
     return src;
+  // Khởi tạo các ma trận lưu trữ ảnh tạm thời
   cv::Mat lab, dst;
+  // Chuyển đổi không gian màu từ BGR sang Lab để tách biệt kênh độ sáng (L) và kênh màu (a, b)
   cv::cvtColor(src, lab, cv::COLOR_BGR2Lab);
+  // Khởi tạo vector chứa 3 kênh màu riêng biệt
   std::vector<cv::Mat> planes(3);
+  // Phân tách ảnh không gian Lab thành 3 kênh độc lập (planes[0] là kênh độ sáng L)
   cv::split(lab, planes);
+  // Tạo bộ lọc CLAHE (Contrast Limited Adaptive Histogram Equalization) với giới hạn clip là 4.0 và kích thước ô 8x8
   cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(4.0, cv::Size(8, 8));
+  // Áp dụng cân bằng lược đồ màu CLAHE lên kênh độ sáng planes[0]
   clahe->apply(planes[0], planes[0]);
+  // Trộn các kênh màu đã xử lý độ sáng trở lại thành ảnh không gian màu Lab
   cv::merge(planes, lab);
+  // Chuyển đổi ngược lại ảnh từ không gian màu Lab về BGR để hiển thị
   cv::cvtColor(lab, dst, cv::COLOR_Lab2BGR);
+  // Trả về ảnh đã được tối ưu độ tương phản
   return dst;
 }
 
-// Gửi log sự kiện khi trạng thái thay đổi
+// Hàm in thông tin log báo cáo trạng thái của ROI khi có sự thay đổi (Có Rack <=> Trống)
 void reportToServer(const std::string &roiName, bool hasRack) {
+  // In ra màn hình console dòng log sự kiện thay đổi trạng thái
   std::cout << "[REPORT] " << roiName << " thay đổi trạng thái: "
             << (hasRack ? "CÓ RACK (OCCUPIED)" : "TRỐNG (EMPTY)") << std::endl;
 }
 
-// Kiểm tra va chạm giữa đối tượng Rack phát hiện bởi YOLO và vùng đa giác ROI
+// Hàm kiểm tra va chạm giữa đa giác ROI và danh sách các đối tượng Rack phát hiện bởi YOLOv8
 bool checkPolygonIntersection(const std::vector<cv::Point> &polygon,
                               const std::vector<Detection> &detections) {
+  // Nếu tọa độ đa giác hoặc danh sách phát hiện rỗng thì coi như không va chạm
   if (polygon.empty() || detections.empty())
     return false;
 
+  // Chuyển đổi tọa độ đa giác kiểu số nguyên (cv::Point) sang kiểu số thực (cv::Point2f) để tính toán chính xác
   std::vector<cv::Point2f> polyF;
+  // Đặt trước dung lượng bộ nhớ cho vector để tối ưu hiệu năng
   polyF.reserve(polygon.size());
+  // Lặp qua từng điểm đa giác để sao chép sang định dạng số thực
   for (const auto &p : polygon)
     polyF.push_back(cv::Point2f(p.x, p.y));
 
+  // Tính toán diện tích của vùng đa giác ROI
   double polyArea = cv::contourArea(polyF);
+  // Nếu diện tích đa giác nhỏ hơn hoặc bằng 0 (đa giác không hợp lệ), trả về false
   if (polyArea <= 0)
     return false;
 
+  // Lặp qua từng đối tượng được phát hiện bởi mô hình AI
   for (const auto &det : detections) {
-    // Cách 1: Tâm dưới của bounding box nằm trong đa giác
+    // Phương pháp 1: Kiểm tra xem điểm chính giữa cạnh dưới của bounding box đối tượng có nằm trong đa giác ROI không
+    // Cạnh dưới (bottom center) phản ánh vị trí tiếp đất của chân kệ Rack
     cv::Point bottomCenter(det.box.x + det.box.width / 2,
                            det.box.y + det.box.height);
+    // Sử dụng hàm pointPolygonTest kiểm tra điểm đối với đa giác (trả về >= 0 nếu nằm trong hoặc trên cạnh)
     if (cv::pointPolygonTest(
             polygon, cv::Point2f(bottomCenter.x, bottomCenter.y), false) >= 0) {
-      return true;
+      return true; // Phát hiện va chạm thành công
     }
 
-    // Cách 2: Diện tích giao cắt chiếm tỷ lệ lớn (>40%) vùng ROI
+    // Phương pháp 2: Kiểm tra diện tích phần giao nhau giữa bounding box của đối tượng và đa giác ROI
+    // Tạo danh sách 4 đỉnh của bounding box của đối tượng dưới dạng Point2f
     std::vector<cv::Point2f> rectF = {
         cv::Point2f(det.box.x, det.box.y),
         cv::Point2f(det.box.x + det.box.width, det.box.y),
         cv::Point2f(det.box.x + det.box.width, det.box.y + det.box.height),
         cv::Point2f(det.box.x, det.box.y + det.box.height)};
+    // Vector lưu trữ các đỉnh của đa giác phần giao cắt
     std::vector<cv::Point2f> intersection;
+    // Tính diện tích phần giao cắt giữa đa giác ROI và bounding box đối tượng
     float intersectArea =
         cv::intersectConvexConvex(polyF, rectF, intersection, true);
+    // Nếu tỷ lệ diện tích giao cắt so với diện tích đa giác ROI vượt quá 40%
     if ((intersectArea / polyArea) > 0.40f) {
-      return true;
+      return true; // Xác nhận có đối tượng đỗ trong vùng ROI
     }
   }
+  // Trả về false nếu không phát hiện bất kỳ sự va chạm hay đè lấp nào
   return false;
 }
 
@@ -197,15 +235,23 @@ bool checkPolygonIntersection(const std::vector<cv::Point> &polygon,
 // LUỒNG 1: CAMERA GRABBING (Lấy khung hình thô từ Camera)
 // ==========================================
 void cameraThreadFunc(CameraStream *camera) {
+  // Biến tạm để lưu trữ khung hình vừa chụp
   cv::Mat tempFrame;
+  // Vòng lặp chạy liên tục cho đến khi ứng dụng có lệnh tắt (g_running chuyển false)
   while (g_running) {
+    // Gọi hàm lấy khung hình từ camera stream
     if (camera->retrieveFrame(tempFrame)) {
+      // Nếu khung hình lấy được không rỗng
       if (!tempFrame.empty()) {
+        // Sử dụng lock_guard để khóa mutex g_bufferMutex bảo vệ vùng đệm dùng chung
         std::lock_guard<std::mutex> lock(g_bufferMutex);
+        // Sao chép sâu (clone) khung hình vào vùng đệm chia sẻ g_sharedFrame
         g_sharedFrame = tempFrame.clone();
+        // Đặt cờ thông báo đã có khung hình mới
         g_hasNewFrame = true;
       }
     } else {
+      // Nếu camera chưa trả về khung hình mới, tạm dừng luồng 2ms để tránh quá tải CPU
       std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
   }
@@ -216,73 +262,109 @@ void cameraThreadFunc(CameraStream *camera) {
 // ==========================================
 void aiCoreThreadFunc(YOLOv8Detector *detector, RegionMonitor *monitor1,
                       RegionMonitor *monitor2) {
+  // Khung hình cục bộ dùng để xử lý AI trong luồng này
   cv::Mat localFrame;
+  // Biến lưu trữ trạng thái có Rack trước đó của ROI 1 để phát hiện sự thay đổi trạng thái
   bool prevOccupied1 = false;
+  // Biến lưu trữ trạng thái có Rack trước đó của ROI 2 để phát hiện sự thay đổi trạng thái
   bool prevOccupied2 = false;
 
+  // Vòng lặp chạy liên tục xử lý AI cho đến khi ứng dụng dừng hẳn
   while (g_running) {
+    // Biến cờ xác định xem luồng có lấy được khung hình mới để xử lý hay không
     bool process = false;
     {
+      // Khóa mutex g_bufferMutex để đọc khung hình từ vùng đệm chia sẻ an toàn
       std::lock_guard<std::mutex> lock(g_bufferMutex);
+      // Nếu có khung hình mới từ luồng Camera
       if (g_hasNewFrame) {
+        // Sao chép khung hình sang biến cục bộ localFrame
         localFrame = g_sharedFrame.clone();
+        // Thiết lập lại cờ báo hiệu đã xử lý khung hình hiện tại
         g_hasNewFrame = false;
+        // Đặt cờ xử lý là true
         process = true;
       }
     }
 
+    // Nếu lấy được khung hình mới và ảnh không bị rỗng
     if (process && !localFrame.empty()) {
+      // Tăng cường độ tương phản ảnh trước khi đưa vào mô hình phát hiện để cải thiện độ chính xác
       cv::Mat enhanced = enhanceContrast(localFrame);
+      // Đưa ảnh đã tăng cường vào đối tượng YOLOv8 để thực hiện nhận diện Rack
       std::vector<Detection> dets = detector->detect(enhanced);
 
+      // Lọc danh sách các đối tượng phát hiện nằm trong vùng hợp lệ
       std::vector<Detection> validDets;
       for (const auto &d : dets) {
+        // Nếu bounding box thuộc vùng hợp lệ thì thêm vào danh sách validDets
         if (isValidRackArea(d.box)) {
           validDets.push_back(d);
         }
       }
 
+      // Kiểm tra va chạm đa giác cho ROI 1 với danh sách đối tượng hợp lệ
       bool isOccupied1 = checkPolygonIntersection(g_pts1, validDets);
+      // Kiểm tra va chạm đa giác cho ROI 2 với danh sách đối tượng hợp lệ
       bool isOccupied2 = checkPolygonIntersection(g_pts2, validDets);
 
+      // Cập nhật trạng thái giao cắt vào đối tượng monitor1 để quản lý logic nghiệp vụ
       monitor1->checkIntersection(validDets);
+      // Cập nhật trạng thái giao cắt vào đối tượng monitor2 để quản lý logic nghiệp vụ
       monitor2->checkIntersection(validDets);
 
+      // Nếu trạng thái của ROI 1 thay đổi so với lần lặp trước đó
       if (isOccupied1 != prevOccupied1) {
+        // Gửi log/báo cáo thay đổi trạng thái
         reportToServer("ROI1", isOccupied1);
+        // Nếu chuyển từ KHÔNG RACK sang CÓ RACK (tức là vừa đỗ kệ vào)
         if (isOccupied1) {
+          // Khóa mutex lịch sử để ghi nhận sự kiện an toàn
           std::lock_guard<std::mutex> lock(g_historyMutex);
+          // Giới hạn lịch sử lưu tối đa 20 bản ghi để tránh tràn bộ nhớ
           if (g_entryHistory.size() >= 20) {
             g_entryHistory.clear();
           }
+          // Thêm thông tin sự kiện kèm nhãn thời gian hiện tại vào lịch sử
           g_entryHistory.push_back("ROI 1 | " + getCurrentTimestamp());
         }
+        // Cập nhật trạng thái trước đó
         prevOccupied1 = isOccupied1;
       }
+      // Nếu trạng thái của ROI 2 thay đổi so với lần lặp trước đó
       if (isOccupied2 != prevOccupied2) {
+        // Gửi log/báo cáo thay đổi trạng thái
         reportToServer("ROI2", isOccupied2);
+        // Nếu chuyển từ KHÔNG RACK sang CÓ RACK
         if (isOccupied2) {
+          // Khóa mutex lịch sử để ghi nhận sự kiện an toàn
           std::lock_guard<std::mutex> lock(g_historyMutex);
+          // Giới hạn lịch sử lưu tối đa 20 bản ghi
           if (g_entryHistory.size() >= 20) {
             g_entryHistory.clear();
           }
+          // Thêm thông tin sự kiện kèm nhãn thời gian hiện tại vào lịch sử
           g_entryHistory.push_back("ROI 2 | " + getCurrentTimestamp());
         }
+        // Cập nhật trạng thái trước đó
         prevOccupied2 = isOccupied2;
       }
 
       {
+        // Khóa mutex g_alarmMutex để cập nhật biến trạng thái báo động toàn cục dùng chung
         std::lock_guard<std::mutex> lock(g_alarmMutex);
         roi_1_alarm = isOccupied1;
         roi_2_alarm = isOccupied2;
       }
 
       {
+        // Khóa mutex g_guiMutex để truyền khung hình gốc sang vùng đệm vẽ GUI cục bộ
         std::lock_guard<std::mutex> lock(g_guiMutex);
         g_guiFrame = localFrame.clone();
         g_guiNewFrame = true;
       }
     } else {
+      // Nếu không có khung hình mới, tạm dừng luồng 5ms để tránh lặp lãng phí CPU
       std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
   }
