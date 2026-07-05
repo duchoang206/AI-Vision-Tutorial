@@ -114,6 +114,21 @@ std::vector<Detection> YOLOv8Detector::postprocess(const cv::Mat& frame, const s
     int dimensions = output.cols;
     int classesCount = dimensions - 4;
 
+    static bool printedClasses = false;
+    if (!printedClasses) {
+        std::cout << "[YOLOv8Detector] Model output dimensions: " << dimensions 
+                  << " (classes count: " << classesCount << ")" << std::endl;
+        if (classesCount == 1) {
+            classNames = {"rack"};
+        } else if (classesCount != 80) {
+            classNames.clear();
+            for (int i = 0; i < classesCount; ++i) {
+                classNames.push_back("class_" + std::to_string(i));
+            }
+        }
+        printedClasses = true;
+    }
+
     std::vector<int> classIds;
     std::vector<float> confidences;
     std::vector<cv::Rect> boxes;
