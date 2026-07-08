@@ -1,0 +1,8 @@
+build/
+.vscode/
+*.exe
+*.mp4
+weights/
+third_party/
+cuda_libs/
+*.onnx
