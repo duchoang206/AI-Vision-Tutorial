@@ -1,6 +1,7 @@
 #include "RegionMonitor.hpp"
+#include <algorithm>
 
-RegionMonitor::RegionMonitor() : roiBox(0, 0, 0, 0), isDrawing(false) {}
+RegionMonitor::RegionMonitor(float intersectionThreshold) : roiBox(0, 0, 0, 0), isDrawing(false), intersectionThreshold(intersectionThreshold) {}
 
 void RegionMonitor::handleMouseCallback(int event, int x, int y, int flags) {
   if (event == cv::EVENT_LBUTTONDOWN) {
@@ -27,10 +28,10 @@ bool RegionMonitor::checkIntersection(
   for (const auto &det : detections) {
     cv::Rect inter = det.box & roiBox;
     if (inter.area() > 0) {
-      // Nếu diện tích phần giao cắt vượt quá 25% diện tích vùng vẽ hoặc vùng
+      // Nếu diện tích phần giao cắt vượt quá ngưỡng diện tích vùng vẽ hoặc vùng
       // vật thể
-      if ((float)inter.area() / roiBox.area() > 0.25f ||
-          (float)inter.area() / det.box.area() > 0.25f) {
+      if ((float)inter.area() / roiBox.area() > intersectionThreshold ||
+          (float)inter.area() / det.box.area() > intersectionThreshold) {
         return true;
       }
     }
@@ -40,12 +41,12 @@ bool RegionMonitor::checkIntersection(
 
 void RegionMonitor::drawUI(cv::Mat &frame,
                            const std::vector<Detection> &detections,
-                           bool isOccupied) {
+                           bool isOccupied, const std::string& className) {
   // 1. Vẽ các vật thể AI nhận diện được (Màu xanh lá)
   for (const auto &det : detections) {
     cv::rectangle(frame, det.box, cv::Scalar(0, 255, 0), 2);
     std::string label =
-        "Rack: " + std::to_string(int(det.confidence * 100)) + "%";
+        det.className + ": " + std::to_string(int(det.confidence * 100)) + "%";
     cv::putText(frame, label, cv::Point(det.box.x, det.box.y - 5),
                 cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
   }
@@ -54,8 +55,10 @@ void RegionMonitor::drawUI(cv::Mat &frame,
   if (roiBox.width > 0 && roiBox.height > 0) {
     if (isOccupied) {
       cv::rectangle(frame, roiBox, cv::Scalar(0, 0, 255),
-                    3); // ĐỎ khi có rack xâm nhập
-      cv::putText(frame, "STATUS: OCCUPIED (RACK IN ZONE)", cv::Point(30, 40),
+                    3); // ĐỎ khi có object xâm nhập
+      std::string upperClassName = className;
+      std::transform(upperClassName.begin(), upperClassName.end(), upperClassName.begin(), ::toupper);
+      cv::putText(frame, "STATUS: OCCUPIED (" + upperClassName + " IN ZONE)", cv::Point(30, 40),
                   cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 255), 2);
     } else {
       cv::rectangle(frame, roiBox, cv::Scalar(0, 255, 255),

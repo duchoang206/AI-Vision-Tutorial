@@ -15,7 +15,8 @@ struct Detection {
 
 class YOLOv8Detector {
 public:
-    YOLOv8Detector(const std::string& modelPath, 
+    YOLOv8Detector(const std::string& modelPath,
+                   const std::string& className,
                    const cv::Size& inputSize = cv::Size(640, 640),
                    float confThreshold = 0.25f, 
                    float nmsThreshold = 0.45f);
@@ -24,8 +25,14 @@ public:
     bool loadModel();
     std::vector<Detection> detect(const cv::Mat& frame);
 
+    std::string getPrimaryClassName() const {
+        if (!classNames.empty()) return classNames[0];
+        return targetClassName;
+    }
+
 private:
     std::string modelPath;
+    std::string targetClassName;
     cv::Size inputSize;
     float confThreshold;
     float nmsThreshold;

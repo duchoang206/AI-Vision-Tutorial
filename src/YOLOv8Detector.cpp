@@ -5,22 +5,15 @@
 #include <numeric>
 
 YOLOv8Detector::YOLOv8Detector(const std::string& modelPath, 
+                               const std::string& className,
                                const cv::Size& inputSize,
                                float confThreshold, 
                                float nmsThreshold)
-    : modelPath(modelPath), inputSize(inputSize), 
+    : modelPath(modelPath), targetClassName(className), inputSize(inputSize), 
       confThreshold(confThreshold), nmsThreshold(nmsThreshold) {
-    // Populate COCO classes as default
-    classNames = {"person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
-                  "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat",
-                  "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack",
-                  "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball",
-                  "kite", "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket",
-                  "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
-                  "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake",
-                  "chair", "couch", "potted plant", "bed", "dining table", "toilet", "tv", "laptop",
-                  "mouse", "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink",
-                  "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush"};
+    // Populate the first class with the dynamic class name. 
+    // If it's a multi-class model, other classes will be auto-generated in postprocess or can be loaded later.
+    classNames = {targetClassName};
 }
 
 YOLOv8Detector::~YOLOv8Detector() {}
@@ -51,6 +44,30 @@ bool YOLOv8Detector::loadModel() {
         for(auto& name : outputNames) { outputNodeNames.push_back(name.c_str()); }
         
         std::cout << "[YOLOv8Detector] Successfully loaded model via ONNX Runtime: " << modelPath << std::endl;
+        
+        // Load class names from labels.txt
+        std::string directory = "";
+        size_t last_slash = modelPath.find_last_of("/\\");
+        if (last_slash != std::string::npos) {
+            directory = modelPath.substr(0, last_slash + 1);
+        }
+        std::string labelsPath = directory + "labels.txt";
+        std::ifstream labelsFile(labelsPath);
+        if (labelsFile.is_open()) {
+            classNames.clear();
+            std::string line;
+            while (std::getline(labelsFile, line)) {
+                if (!line.empty()) {
+                    classNames.push_back(line);
+                }
+            }
+            labelsFile.close();
+            std::cout << "[YOLOv8Detector] Loaded " << classNames.size() << " classes from " << labelsPath << std::endl;
+        } else {
+            std::cout << "[YOLOv8Detector] Warning: Could not open " << labelsPath << ". Using default class: " << targetClassName << std::endl;
+            classNames = {targetClassName};
+        }
+
         return true;
     } catch (const Ort::Exception& e) {
         std::cerr << "[YOLOv8Detector] ORT Exception loading model: " << e.what() << std::endl;
@@ -142,14 +159,6 @@ std::vector<Detection> YOLOv8Detector::postprocess(const cv::Mat& frame, float* 
     if (!printedClasses) {
         std::cout << "[YOLOv8Detector] Model output dimensions: " << dimensions 
                   << " (classes count: " << classesCount << ")" << std::endl;
-        if (classesCount == 1) {
-            classNames = {"rack"};
-        } else if (classesCount != 80) {
-            classNames.clear();
-            for (int i = 0; i < classesCount; ++i) {
-                classNames.push_back("class_" + std::to_string(i));
-            }
-        }
         printedClasses = true;
     }
 

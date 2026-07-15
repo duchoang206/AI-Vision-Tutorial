@@ -13,6 +13,8 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <fstream>
+#include <nlohmann/json.hpp>
 
 #include <ixwebsocket/IXNetSystem.h>
 #include <ixwebsocket/IXWebSocket.h>
@@ -26,19 +28,27 @@
 // ============================================================================
 // ============================================================================
 
-const std::string DEFAULT_CAMERA_RTSP =
-    "rtsp://admin:rtc%402025@192.168.5.201:554/cam/"
-    "realmonitor?channel=1&subtype=0";
+struct AppConfig {
+    std::string weights_path;
+    std::string class_name;
+    float confidence_threshold;
+    float nms_threshold;
+    
+    float intersection_threshold;
+    float polygon_intersection_threshold;
+    int ignore_left_x;
+    int ignore_bottom_y;
 
-const std::string DEFAULT_MODEL_PATH = "weights/best-sim.onnx";
+    std::vector<cv::Point> roi_1;
+    std::vector<cv::Point> roi_2;
+    
+    std::string camera_source;
+};
+
+AppConfig g_config;
 
 const int MODBUS_PORT = 502; 
-const int WEBSOCKET_PORT = 8082; 
-
-std::vector<cv::Point> g_pts1 = {cv::Point(1168, 391), cv::Point(1296, 344),
-                                 cv::Point(1444, 405), cv::Point(1300, 460)};
-std::vector<cv::Point> g_pts2 = {cv::Point(1476, 427), cv::Point(1655, 512),
-                                 cv::Point(1520, 575), cv::Point(1341, 490)};
+const int WEBSOCKET_PORT = 8082;
 
 // ============================================================================
 
@@ -46,6 +56,9 @@ std::vector<cv::Point> g_pts2 = {cv::Point(1476, 427), cv::Point(1655, 512),
 std::mutex g_alarmMutex;
 bool roi_1_alarm = false; 
 bool roi_2_alarm = false;
+
+std::mutex g_detsMutex;
+std::vector<Detection> g_latestDets;
 
 // --- Lịch sử phát hiện Rack ---
 std::mutex g_historyMutex;
@@ -84,7 +97,8 @@ std::string getCurrentTimestamp() {
 }
 
 bool isValidRackArea(const cv::Rect &box) {
-  return box.x >= 700 && (box.y + box.height) <= 600;
+  if (g_config.ignore_left_x == 0 && g_config.ignore_bottom_y == 0) return true;
+  return box.x >= g_config.ignore_left_x && (box.y + box.height) <= g_config.ignore_bottom_y;
 }
 
 cv::Mat enhanceContrast(const cv::Mat &src) {
@@ -101,9 +115,11 @@ cv::Mat enhanceContrast(const cv::Mat &src) {
   return dst;
 }
 
-void reportToServer(const std::string &roiName, bool hasRack) {
+void reportToServer(const std::string &roiName, bool hasObject) {
+  std::string upperClass = g_config.class_name;
+  std::transform(upperClass.begin(), upperClass.end(), upperClass.begin(), ::toupper);
   std::cout << "[REPORT] " << roiName << " thay đổi trạng thái: "
-            << (hasRack ? "CÓ RACK (OCCUPIED)" : "TRỐNG (EMPTY)") << std::endl;
+            << (hasObject ? "CÓ " + upperClass + " (OCCUPIED)" : "TRỐNG (EMPTY)") << std::endl;
 }
 
 bool checkPolygonIntersection(const std::vector<cv::Point> &polygon,
@@ -128,6 +144,13 @@ bool checkPolygonIntersection(const std::vector<cv::Point> &polygon,
       return true;
     }
 
+    // Đọc cả 4 chân ở 4 viền của ROI (Đã comment lại vì dễ gây báo động nhầm khi bounding box quá to)
+    // for (const auto &p : polygon) {
+    //   if (det.box.contains(p)) {
+    //     return true;
+    //   }
+    // }
+
     std::vector<cv::Point2f> rectF = {
         cv::Point2f(det.box.x, det.box.y),
         cv::Point2f(det.box.x + det.box.width, det.box.y),
@@ -136,7 +159,7 @@ bool checkPolygonIntersection(const std::vector<cv::Point> &polygon,
     std::vector<cv::Point2f> intersection;
     float intersectArea =
         cv::intersectConvexConvex(polyF, rectF, intersection, true);
-    if ((intersectArea / polyArea) > 0.40f) {
+    if ((intersectArea / polyArea) > g_config.polygon_intersection_threshold) {
       return true;
     }
   }
@@ -190,8 +213,8 @@ void aiCoreThreadFunc(YOLOv8Detector *detector, RegionMonitor *monitor1,
         }
       }
 
-      bool isOccupied1 = checkPolygonIntersection(g_pts1, validDets);
-      bool isOccupied2 = checkPolygonIntersection(g_pts2, validDets);
+      bool isOccupied1 = checkPolygonIntersection(g_config.roi_1, validDets);
+      bool isOccupied2 = checkPolygonIntersection(g_config.roi_2, validDets);
 
       monitor1->checkIntersection(validDets);
       monitor2->checkIntersection(validDets);
@@ -223,6 +246,11 @@ void aiCoreThreadFunc(YOLOv8Detector *detector, RegionMonitor *monitor1,
         std::lock_guard<std::mutex> lock(g_alarmMutex);
         roi_1_alarm = isOccupied1;
         roi_2_alarm = isOccupied2;
+      }
+
+      {
+        std::lock_guard<std::mutex> lock(g_detsMutex);
+        g_latestDets = validDets;
       }
 
       {
@@ -311,6 +339,12 @@ void websocketThreadFunc() {
         localFrame = g_sharedFrame.clone();
     }
 
+    std::vector<Detection> localDets;
+    {
+      std::lock_guard<std::mutex> lock(g_detsMutex);
+      localDets = g_latestDets;
+    }
+
     std::vector<uchar> localJpeg;
     bool hasFrame = false;
 
@@ -324,16 +358,22 @@ void websocketThreadFunc() {
         lastFpsUpdate = now;
       }
 
+      for (const auto& d : localDets) {
+        cv::rectangle(localFrame, d.box, cv::Scalar(255, 165, 0), 2);
+        cv::putText(localFrame, d.className + " " + cv::format("%.2f", d.confidence), 
+                    cv::Point(d.box.x, d.box.y - 5), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 165, 0), 2);
+      }
+
       cv::Scalar color1 = r1 ? cv::Scalar(0, 0, 255) : cv::Scalar(0, 255, 0);
-      std::vector<std::vector<cv::Point>> polys1 = {g_pts1};
+      std::vector<std::vector<cv::Point>> polys1 = {g_config.roi_1};
       cv::polylines(localFrame, polys1, true, color1, 2);
-      cv::putText(localFrame, "ROI 1", cv::Point(g_pts1[0].x, g_pts1[0].y - 8),
+      cv::putText(localFrame, "ROI 1", cv::Point(g_config.roi_1[0].x, g_config.roi_1[0].y - 8),
                   cv::FONT_HERSHEY_SIMPLEX, 0.6, color1, 2);
 
       cv::Scalar color2 = r2 ? cv::Scalar(0, 0, 255) : cv::Scalar(0, 255, 0);
-      std::vector<std::vector<cv::Point>> polys2 = {g_pts2};
+      std::vector<std::vector<cv::Point>> polys2 = {g_config.roi_2};
       cv::polylines(localFrame, polys2, true, color2, 2);
-      cv::putText(localFrame, "ROI 2", cv::Point(g_pts2[0].x, g_pts2[0].y - 8),
+      cv::putText(localFrame, "ROI 2", cv::Point(g_config.roi_2[0].x, g_config.roi_2[0].y - 8),
                   cv::FONT_HERSHEY_SIMPLEX, 0.6, color2, 2);
 
       std::string statusText1 =
@@ -456,8 +496,38 @@ void modbusThreadFunc() {
 int main(int argc, char *argv[]) {
   ix::initNetSystem();
 
-  std::string videoSource = DEFAULT_CAMERA_RTSP;
-  std::string modelPath = DEFAULT_MODEL_PATH;
+  std::ifstream f("config.json");
+  if (!f.is_open()) {
+      std::cerr << "Failed to open config.json. Exiting...\n";
+      return -1;
+  }
+  nlohmann::json j;
+  try {
+      f >> j;
+      g_config.weights_path = j["model_settings"]["weights_path"];
+      g_config.class_name = j["model_settings"]["class_name"];
+      g_config.confidence_threshold = j["model_settings"]["confidence_threshold"];
+      g_config.nms_threshold = j["model_settings"]["nms_threshold"];
+      
+      g_config.intersection_threshold = j["logic_settings"]["intersection_threshold"];
+      g_config.polygon_intersection_threshold = j["logic_settings"]["polygon_intersection_threshold"];
+      g_config.ignore_left_x = j["logic_settings"]["ignore_left_x"];
+      g_config.ignore_bottom_y = j["logic_settings"]["ignore_bottom_y"];
+      
+      for (auto& pt : j["roi_settings"]["roi_1"]) {
+          g_config.roi_1.push_back(cv::Point(pt[0], pt[1]));
+      }
+      for (auto& pt : j["roi_settings"]["roi_2"]) {
+          g_config.roi_2.push_back(cv::Point(pt[0], pt[1]));
+      }
+      g_config.camera_source = j["camera_source"];
+  } catch(const std::exception& e) {
+      std::cerr << "Error parsing config.json: " << e.what() << "\n";
+      return -1;
+  }
+
+  std::string videoSource = g_config.camera_source;
+  std::string modelPath = g_config.weights_path;
   if (argc > 1)
     videoSource = argv[1];
   if (argc > 2)
@@ -474,15 +544,18 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 
-  YOLOv8Detector detector(modelPath, cv::Size(640, 640), 0.65f, 0.45f);
+  YOLOv8Detector detector(modelPath, g_config.class_name, cv::Size(640, 640), g_config.confidence_threshold, g_config.nms_threshold);
   if (!detector.loadModel()) {
     camera.stop();
     ix::uninitNetSystem();
     return -1;
   }
+  
+  // Tự động gán tên lớp từ file labels.txt để in log và không cần sửa config.json
+  g_config.class_name = detector.getPrimaryClassName();
 
-  RegionMonitor monitor1;
-  cv::Rect roiRect1 = cv::boundingRect(g_pts1);
+  RegionMonitor monitor1(g_config.intersection_threshold);
+  cv::Rect roiRect1 = cv::boundingRect(g_config.roi_1);
   monitor1.handleMouseCallback(cv::EVENT_LBUTTONDOWN, roiRect1.x, roiRect1.y,
                                0);
   monitor1.handleMouseCallback(cv::EVENT_MOUSEMOVE, roiRect1.x + roiRect1.width,
@@ -490,8 +563,8 @@ int main(int argc, char *argv[]) {
   monitor1.handleMouseCallback(cv::EVENT_LBUTTONUP, roiRect1.x + roiRect1.width,
                                roiRect1.y + roiRect1.height, 0);
 
-  RegionMonitor monitor2;
-  cv::Rect roiRect2 = cv::boundingRect(g_pts2);
+  RegionMonitor monitor2(g_config.intersection_threshold);
+  cv::Rect roiRect2 = cv::boundingRect(g_config.roi_2);
   monitor2.handleMouseCallback(cv::EVENT_LBUTTONDOWN, roiRect2.x, roiRect2.y,
                                0);
   monitor2.handleMouseCallback(cv::EVENT_MOUSEMOVE, roiRect2.x + roiRect2.width,
@@ -528,16 +601,28 @@ int main(int argc, char *argv[]) {
         r2 = roi_2_alarm;
       }
 
+      std::vector<Detection> localDets;
+      {
+        std::lock_guard<std::mutex> lock(g_detsMutex);
+        localDets = g_latestDets;
+      }
+
+      for (const auto& d : localDets) {
+        cv::rectangle(localFrame, d.box, cv::Scalar(255, 165, 0), 2);
+        cv::putText(localFrame, d.className + " " + cv::format("%.2f", d.confidence), 
+                    cv::Point(d.box.x, d.box.y - 5), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 165, 0), 2);
+      }
+
       cv::Scalar color1 = r1 ? cv::Scalar(0, 0, 255) : cv::Scalar(0, 255, 0);
-      std::vector<std::vector<cv::Point>> polys1 = {g_pts1};
+      std::vector<std::vector<cv::Point>> polys1 = {g_config.roi_1};
       cv::polylines(localFrame, polys1, true, color1, 2);
-      cv::putText(localFrame, "ROI 1", cv::Point(g_pts1[0].x, g_pts1[0].y - 8),
+      cv::putText(localFrame, "ROI 1", cv::Point(g_config.roi_1[0].x, g_config.roi_1[0].y - 8),
                   cv::FONT_HERSHEY_SIMPLEX, 0.6, color1, 2);
 
       cv::Scalar color2 = r2 ? cv::Scalar(0, 0, 255) : cv::Scalar(0, 255, 0);
-      std::vector<std::vector<cv::Point>> polys2 = {g_pts2};
+      std::vector<std::vector<cv::Point>> polys2 = {g_config.roi_2};
       cv::polylines(localFrame, polys2, true, color2, 2);
-      cv::putText(localFrame, "ROI 2", cv::Point(g_pts2[0].x, g_pts2[0].y - 8),
+      cv::putText(localFrame, "ROI 2", cv::Point(g_config.roi_2[0].x, g_config.roi_2[0].y - 8),
                   cv::FONT_HERSHEY_SIMPLEX, 0.6, color2, 2);
 
       std::string statusText1 =

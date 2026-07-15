@@ -14,6 +14,13 @@ message(STATUS "    include path: ${OpenCV_INCLUDE_DIRS}")
 # Add custom module path for Findlibmodbus.cmake
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# Fetch nlohmann_json
+include(FetchContent)
+FetchContent_Declare(json
+  URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+)
+FetchContent_MakeAvailable(json)
+
 # Find libmodbus, Threads and ixwebsocket
 find_package(Threads REQUIRED)
 find_package(libmodbus REQUIRED)
@@ -41,12 +48,13 @@ add_executable(${PROJECT_NAME} ${SOURCES})
 # ONNXRuntime Library
 find_library(ONNXRUNTIME_LIB onnxruntime HINTS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/onnxruntime/lib REQUIRED)
 
-# Link OpenCV, libmodbus, ixwebsocket, ONNXRuntime, and Windows socket dependencies
+# Link OpenCV, libmodbus, ixwebsocket, ONNXRuntime, nlohmann_json, and Windows socket dependencies
 target_link_libraries(${PROJECT_NAME} PRIVATE
     ${OpenCV_LIBS}
     libmodbus::libmodbus
     ixwebsocket::ixwebsocket
     ${ONNXRUNTIME_LIB}
+    nlohmann_json::nlohmann_json
 )
 
 if(WIN32)

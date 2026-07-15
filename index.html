@@ -13,22 +13,22 @@
         rel="stylesheet">
     <style>
         :root {
-            --bg-base: #f0f4f8;
-            --panel-bg: rgba(255, 255, 255, 0.9);
-            --panel-border: rgba(0, 0, 0, 0.1);
+            --bg-base: #ffffff;
+            --panel-bg: #ffffff;
+            --panel-border: rgba(43, 75, 155, 0.2);
 
-            --text-primary: #1e293b;
+            --text-primary: #2b4b9b;
             --text-secondary: #475569;
 
             /* Curated industrial color tokens */
             --safe-color: #059669;
             --safe-glow: rgba(5, 150, 105, 0.25);
 
-            --alarm-color: #dc2626;
-            --alarm-glow: rgba(220, 38, 38, 0.35);
+            --alarm-color: #F15A29;
+            --alarm-glow: rgba(241, 90, 41, 0.35);
 
-            --accent-cyan: #0284c7;
-            --accent-glow: rgba(2, 132, 199, 0.3);
+            --accent-blue: #2b4b9b;
+            --accent-glow: rgba(43, 75, 155, 0.3);
         }
 
         * {
@@ -47,10 +47,10 @@
             align-items: center;
             overflow-x: hidden;
             background-image:
-                radial-gradient(circle at 5% 10%, rgba(2, 132, 199, 0.08) 0%, transparent 40%),
-                radial-gradient(circle at 95% 90%, rgba(5, 150, 105, 0.05) 0%, transparent 50%),
-                linear-gradient(rgba(0, 0, 0, 0.02) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(0, 0, 0, 0.02) 1px, transparent 1px);
+                radial-gradient(circle at 5% 10%, rgba(43, 75, 155, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 95% 90%, rgba(241, 90, 41, 0.05) 0%, transparent 50%),
+                linear-gradient(rgba(43, 75, 155, 0.05) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(43, 75, 155, 0.05) 1px, transparent 1px);
             background-size: 100% 100%, 100% 100%, 40px 40px, 40px 40px;
             padding: 20px;
         }
@@ -84,34 +84,49 @@
             pointer-events: none;
         }
 
-        h2 {
-            font-family: 'Rajdhani', sans-serif;
-            font-size: 1.6rem;
-            font-weight: 700;
-            letter-spacing: 2px;
-            text-transform: uppercase;
-            margin-bottom: 25px;
-            text-align: left;
-            border-left: 4px solid var(--accent-cyan);
-            padding-left: 15px;
-            background: linear-gradient(90deg, var(--text-primary) 0%, var(--text-secondary) 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+        /* Header Layout */
+        .header-container {
             display: flex;
-            justify-content: space-between;
             align-items: center;
+            justify-content: space-between;
+            margin-bottom: 25px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid rgba(43, 75, 155, 0.1);
+        }
+
+        .logo-container {
+            height: 50px;
+            display: flex;
+            align-items: center;
+        }
+
+        .company-logo {
+            max-height: 100%;
+            object-fit: contain;
+        }
+
+        h2 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.8rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            margin-bottom: 0;
+            text-align: center;
+            flex: 1;
+            color: var(--alarm-color);
         }
 
         .header-meta {
             font-family: 'Share Tech Mono', monospace;
             font-size: 0.85rem;
-            color: var(--accent-cyan);
+            color: var(--accent-blue);
             text-shadow: 0 0 8px var(--accent-glow);
             text-transform: none;
             display: flex;
             align-items: center;
             gap: 8px;
-            -webkit-text-fill-color: var(--accent-cyan);
+            -webkit-text-fill-color: var(--accent-blue);
         }
 
         .live-dot {
@@ -470,12 +485,15 @@
 <body>
 
     <div id="container">
-        <h2>
-            HỆ THỐNG GIÁM SÁT RACK TỰ ĐỘNG
-            <span class="header-meta">
+        <div class="header-container">
+            <div class="logo-container">
+                <img src="logo.png" alt="RTC Logo" class="company-logo" onerror="this.style.display='none';">
+            </div>
+            <h2>HỆ THỐNG GIÁM SÁT VẬT THỂ TỰ ĐỘNG</h2>
+            <div class="header-meta">
                 <span class="live-dot"></span> AI LIVE MONITOR
-            </span>
-        </h2>
+            </div>
+        </div>
 
         <div class="dashboard-content">
             <!-- Left panel: Video Stream -->
