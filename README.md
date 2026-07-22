@@ -333,3 +333,11 @@ Nếu Dashboard báo `OFFLINE` dù server đang chạy, kiểm tra và mở Inbo
 ---
 
 
+---
+chmod +x setup.sh start.sh
+./setup.sh
+
+git clone https://github.com/duchoang206/Detect-RACK-Project.git
+cd Detect-RACK-Project
+
+./start.sh
