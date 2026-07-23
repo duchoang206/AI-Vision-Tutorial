@@ -503,7 +503,8 @@
 
                 <!-- HUD Text Overlays removed -->
 
-                <iframe id="videoStream" src="" frameborder="0" allowfullscreen style="width: 100%; height: 100%; position: relative; z-index: 1;"></iframe>
+                <iframe id="videoStream" src="" frameborder="0" allowfullscreen style="width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 1;"></iframe>
+                <canvas id="overlayCanvas" width="1920" height="1080" style="width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 2; pointer-events: none;"></canvas>
 
                 <div class="loader-container">
                     <div class="spinner"></div>
@@ -536,6 +537,9 @@
         const roi2Element = document.getElementById("roi2");
         const loaderContainer = document.querySelector(".loader-container");
 
+        const canvas = document.getElementById("overlayCanvas");
+        const ctx = canvas.getContext("2d");
+
         let ws = null;
 
         function connect() {
@@ -553,6 +557,8 @@
                 if (typeof event.data === "string") {
                     try {
                         const data = JSON.parse(event.data);
+                        
+                        // Update UI status
                         if (data.roi_1_alarm) {
                             roi1Element.innerText = "ROI 1: OCCUPIED";
                             roi1Element.className = "status alarm";
@@ -568,6 +574,57 @@
                             roi2Element.innerText = "ROI 2: SAFE";
                             roi2Element.className = "status safe";
                         }
+
+                        // Clear Canvas
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                        // Draw ROIs
+                        ctx.lineWidth = 3;
+                        if (data.roi_1_points) {
+                            ctx.strokeStyle = data.roi_1_alarm ? "rgba(255, 60, 60, 0.8)" : "rgba(60, 255, 60, 0.8)";
+                            ctx.fillStyle = data.roi_1_alarm ? "rgba(255, 60, 60, 0.2)" : "rgba(60, 255, 60, 0.1)";
+                            ctx.beginPath();
+                            data.roi_1_points.forEach((pt, idx) => {
+                                if (idx === 0) ctx.moveTo(pt.x, pt.y);
+                                else ctx.lineTo(pt.x, pt.y);
+                            });
+                            ctx.closePath();
+                            ctx.fill();
+                            ctx.stroke();
+                            ctx.fillStyle = ctx.strokeStyle;
+                            ctx.font = "24px 'Share Tech Mono'";
+                            ctx.fillText("ROI 1", data.roi_1_points[0].x, data.roi_1_points[0].y - 10);
+                        }
+                        
+                        if (data.roi_2_points) {
+                            ctx.strokeStyle = data.roi_2_alarm ? "rgba(255, 60, 60, 0.8)" : "rgba(60, 255, 60, 0.8)";
+                            ctx.fillStyle = data.roi_2_alarm ? "rgba(255, 60, 60, 0.2)" : "rgba(60, 255, 60, 0.1)";
+                            ctx.beginPath();
+                            data.roi_2_points.forEach((pt, idx) => {
+                                if (idx === 0) ctx.moveTo(pt.x, pt.y);
+                                else ctx.lineTo(pt.x, pt.y);
+                            });
+                            ctx.closePath();
+                            ctx.fill();
+                            ctx.stroke();
+                            ctx.fillStyle = ctx.strokeStyle;
+                            ctx.font = "24px 'Share Tech Mono'";
+                            ctx.fillText("ROI 2", data.roi_2_points[0].x, data.roi_2_points[0].y - 10);
+                        }
+
+                        // Draw Detections
+                        if (data.detections) {
+                            ctx.lineWidth = 2;
+                            data.detections.forEach(det => {
+                                ctx.strokeStyle = "rgba(0, 190, 255, 0.9)";
+                                ctx.fillStyle = "rgba(0, 190, 255, 0.9)";
+                                ctx.strokeRect(det.x, det.y, det.w, det.h);
+                                
+                                ctx.font = "20px Arial";
+                                ctx.fillText(det.class, det.x, det.y - 5);
+                            });
+                        }
+
                     } catch (e) {
                         console.error("Lỗi parse JSON:", e);
                     }
@@ -583,8 +640,7 @@
 
                 loaderContainer.style.display = "flex";
                 videoElement.style.opacity = "0.05";
-
-
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
 
                 setTimeout(connect, 2000);
             };

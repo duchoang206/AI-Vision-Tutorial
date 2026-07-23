@@ -360,13 +360,40 @@ void websocketThreadFunc() {
       }
     }
 
+    std::string detsJson = "[";
+    {
+      std::lock_guard<std::mutex> lock(g_detsMutex);
+      for (size_t i = 0; i < g_latestDets.size(); ++i) {
+        auto& d = g_latestDets[i];
+        detsJson += "{\"x\":" + std::to_string(d.box.x) + 
+                    ",\"y\":" + std::to_string(d.box.y) + 
+                    ",\"w\":" + std::to_string(d.box.width) + 
+                    ",\"h\":" + std::to_string(d.box.height) + 
+                    ",\"class\":\"" + d.className + "\"}";
+        if (i + 1 < g_latestDets.size()) detsJson += ",";
+      }
+    }
+    detsJson += "]";
+
+    auto makeRoiJson = [](const std::vector<cv::Point>& roi) {
+        std::string s = "[";
+        for (size_t i = 0; i < roi.size(); ++i) {
+            s += "{\"x\":" + std::to_string(roi[i].x) + ",\"y\":" + std::to_string(roi[i].y) + "}";
+            if (i + 1 < roi.size()) s += ",";
+        }
+        s += "]";
+        return s;
+    };
+    std::string roi1Json = makeRoiJson(g_config.roi_1);
+    std::string roi2Json = makeRoiJson(g_config.roi_2);
+
     std::string jsonStr =
         "{\"roi_1_alarm\": " + std::string(r1 ? "true" : "false") +
         ", \"roi_2_alarm\": " + std::string(r2 ? "true" : "false") +
-        ", \"history\": [" + historyJson + "]}";
-
-
-
+        ", \"history\": [" + historyJson + "]" +
+        ", \"detections\": " + detsJson +
+        ", \"roi_1_points\": " + roi1Json +
+        ", \"roi_2_points\": " + roi2Json + "}";
     {
       std::lock_guard<std::mutex> lock(g_wsClientsMutex);
       if (!g_wsClients.empty()) {
