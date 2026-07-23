@@ -529,8 +529,8 @@
         const host = window.location.hostname || "192.168.5.103";
         const wsUrl = "ws://" + host + ":8082/";
         const videoElement = document.getElementById("videoStream");
-        // Load luồng WebRTC từ MediaMTX
-        videoElement.src = "http://" + host + ":8889/cam1";
+        // Load luồng HLS từ MediaMTX (Mượt hơn, không mất khung hình)
+        videoElement.src = "http://" + host + ":8888/cam1";
         
         const roi1Element = document.getElementById("roi1");
         const roi2Element = document.getElementById("roi2");
