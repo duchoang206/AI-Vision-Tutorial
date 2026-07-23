@@ -15,15 +15,15 @@ After=network.target
 [Service]
 Type=simple
 User=$USER_NAME
-WorkingDirectory=$PROJECT_DIR
-ExecStart=$PROJECT_DIR/start.sh
+WorkingDirectory="$PROJECT_DIR"
+ExecStart="$PROJECT_DIR/start.sh"
 Restart=always
 RestartSec=5
 StandardOutput=syslog
 StandardError=syslog
 SyslogIdentifier=detectrack
 Environment=DISPLAY=:0
-Environment=LD_LIBRARY_PATH=$PROJECT_DIR/third_party/onnxruntime/lib
+Environment="LD_LIBRARY_PATH=$PROJECT_DIR/third_party/onnxruntime/lib"
 
 [Install]
 WantedBy=multi-user.target
