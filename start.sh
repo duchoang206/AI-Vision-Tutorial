@@ -5,6 +5,10 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export LD_LIBRARY_PATH="$PROJECT_DIR/third_party/onnxruntime/lib:$LD_LIBRARY_PATH"
 cd "$PROJECT_DIR"
 
+echo "[Hệ thống] Dọn dẹp tiến trình cũ (nếu có)..."
+pkill -f "http.server 9000" || true
+pkill -f "mediamtx" || true
+
 echo "[Hệ thống] Đang khởi động Web Dashboard (Port 9000)..."
 # Chạy Python HTTP Server ngầm (background)
 python3 -m http.server 9000 --bind 0.0.0.0 > /dev/null 2>&1 &
