@@ -249,7 +249,7 @@ void aiCoreThreadFunc(YOLOv8Detector *detector, RegionMonitor *monitor1,
         if (isOccupied1) {
           std::lock_guard<std::mutex> lock(g_historyMutex);
           if (g_entryHistory.size() >= 20) {
-            g_entryHistory.clear();
+            g_entryHistory.erase(g_entryHistory.begin());
           }
           g_entryHistory.push_back("ROI 1 | " + getCurrentTimestamp());
         }
@@ -260,7 +260,7 @@ void aiCoreThreadFunc(YOLOv8Detector *detector, RegionMonitor *monitor1,
         if (isOccupied2) {
           std::lock_guard<std::mutex> lock(g_historyMutex);
           if (g_entryHistory.size() >= 20) {
-            g_entryHistory.clear();
+            g_entryHistory.erase(g_entryHistory.begin());
           }
           g_entryHistory.push_back("ROI 2 | " + getCurrentTimestamp());
         }
@@ -383,32 +383,7 @@ void websocketThreadFunc() {
         lastFpsUpdate = now;
       }
 
-      for (const auto& d : localDets) {
-        cv::rectangle(localFrame, d.box, cv::Scalar(255, 165, 0), 2);
-        cv::putText(localFrame, d.className + " " + cv::format("%.2f", d.confidence), 
-                    cv::Point(d.box.x, d.box.y - 5), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 165, 0), 2);
-      }
 
-      cv::Scalar color1 = r1 ? cv::Scalar(0, 0, 255) : cv::Scalar(0, 255, 0);
-      std::vector<std::vector<cv::Point>> polys1 = {g_config.roi_1};
-      cv::polylines(localFrame, polys1, true, color1, 2);
-      cv::putText(localFrame, "ROI 1", cv::Point(g_config.roi_1[0].x, g_config.roi_1[0].y - 8),
-                  cv::FONT_HERSHEY_SIMPLEX, 0.6, color1, 2);
-
-      cv::Scalar color2 = r2 ? cv::Scalar(0, 0, 255) : cv::Scalar(0, 255, 0);
-      std::vector<std::vector<cv::Point>> polys2 = {g_config.roi_2};
-      cv::polylines(localFrame, polys2, true, color2, 2);
-      cv::putText(localFrame, "ROI 2", cv::Point(g_config.roi_2[0].x, g_config.roi_2[0].y - 8),
-                  cv::FONT_HERSHEY_SIMPLEX, 0.6, color2, 2);
-
-      std::string statusText1 =
-          "ROI 1: " + std::string(r1 ? "OCCUPIED" : "SAFE");
-      std::string statusText2 =
-          "ROI 2: " + std::string(r2 ? "OCCUPIED" : "SAFE");
-      cv::putText(localFrame, statusText1, cv::Point(30, 40),
-                  cv::FONT_HERSHEY_SIMPLEX, 0.75, color1, 2);
-      cv::putText(localFrame, statusText2, cv::Point(30, 70),
-                  cv::FONT_HERSHEY_SIMPLEX, 0.75, color2, 2);
 
       if (streamFps > 0.0) {
         std::string fpsText = cv::format("FPS: %.1f", streamFps + 4.0);
@@ -430,13 +405,26 @@ void websocketThreadFunc() {
     {
       std::lock_guard<std::mutex> lock(g_wsClientsMutex);
       if (!g_wsClients.empty()) {
-        for (auto &ws : g_wsClients) {
+        for (auto it = g_wsClients.begin(); it != g_wsClients.end(); ) {
+          auto ws = *it;
+
+          if (ws->getReadyState() != ix::ReadyState::Open) {
+            it = g_wsClients.erase(it);
+            continue;
+          }
+
+          if (ws->bufferedAmount() > 500 * 1024) {
+            ++it;
+            continue;
+          }
+
           ws->sendText(jsonStr);
           if (hasFrame && !localJpeg.empty()) {
             std::string binaryData(reinterpret_cast<char *>(localJpeg.data()),
                                    localJpeg.size());
             ws->sendBinary(binaryData);
           }
+          ++it;
         }
       }
     }
