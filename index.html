@@ -503,7 +503,7 @@
 
                 <!-- HUD Text Overlays removed -->
 
-                <img id="videoStream" src="" alt="Đang kết nối tới luồng AI Camera..." />
+                <iframe id="videoStream" src="" frameborder="0" allowfullscreen style="width: 100%; height: 100%; position: relative; z-index: 1;"></iframe>
 
                 <div class="loader-container">
                     <div class="spinner"></div>
@@ -526,8 +526,12 @@
     </div>
 
     <script>
-        const wsUrl = "ws://" + (window.location.hostname || "192.168.5.103") + ":8082/";
+        const host = window.location.hostname || "192.168.5.103";
+        const wsUrl = "ws://" + host + ":8082/";
         const videoElement = document.getElementById("videoStream");
+        // Load luồng WebRTC từ MediaMTX
+        videoElement.src = "http://" + host + ":8889/cam1";
+        
         const roi1Element = document.getElementById("roi1");
         const roi2Element = document.getElementById("roi2");
         const loaderContainer = document.querySelector(".loader-container");
@@ -568,13 +572,6 @@
                         console.error("Lỗi parse JSON:", e);
                     }
                 }
-                else if (event.data instanceof Blob) {
-                    const url = URL.createObjectURL(event.data);
-                    const oldUrl = videoElement.src;
-                    videoElement.src = url;
-                    if (oldUrl && oldUrl.startsWith("blob:")) {
-                        URL.revokeObjectURL(oldUrl);
-                    }
                 }
             };
 
@@ -588,11 +585,7 @@
                 loaderContainer.style.display = "flex";
                 videoElement.style.opacity = "0.05";
 
-                const oldUrl = videoElement.src;
-                videoElement.src = "";
-                if (oldUrl && oldUrl.startsWith("blob:")) {
-                    URL.revokeObjectURL(oldUrl);
-                }
+
 
                 setTimeout(connect, 2000);
             };

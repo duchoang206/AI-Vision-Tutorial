@@ -357,50 +357,7 @@ void websocketThreadFunc() {
         ", \"roi_2_alarm\": " + std::string(r2 ? "true" : "false") +
         ", \"history\": [" + historyJson + "]}";
 
-    cv::Mat localFrame;
-    {
-      std::lock_guard<std::mutex> lock(g_bufferMutex);
-      if (!g_sharedFrame.empty())
-        localFrame = g_sharedFrame.clone();
-    }
 
-    std::vector<Detection> localDets;
-    {
-      std::lock_guard<std::mutex> lock(g_detsMutex);
-      localDets = g_latestDets;
-    }
-
-    std::vector<uchar> localJpeg;
-    bool hasFrame = false;
-
-    if (!localFrame.empty()) {
-      frameCount++;
-      auto now = std::chrono::steady_clock::now();
-      std::chrono::duration<double> elapsed = now - lastFpsUpdate;
-      if (elapsed.count() >= 0.5) {
-        streamFps = frameCount / elapsed.count();
-        frameCount = 0;
-        lastFpsUpdate = now;
-      }
-
-
-
-      if (streamFps > 0.0) {
-        std::string fpsText = cv::format("FPS: %.1f", streamFps + 4.0);
-        cv::putText(localFrame, fpsText, cv::Point(16, localFrame.rows - 16),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 0), 2,
-                    cv::LINE_AA);
-        cv::putText(localFrame, fpsText, cv::Point(15, localFrame.rows - 17),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 1,
-                    cv::LINE_AA);
-      }
-
-      cv::Mat webFrame;
-      cv::resize(localFrame, webFrame, cv::Size(960, 540));
-      std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, 70};
-      cv::imencode(".jpg", webFrame, localJpeg, params);
-      hasFrame = true;
-    }
 
     {
       std::lock_guard<std::mutex> lock(g_wsClientsMutex);
@@ -419,17 +376,12 @@ void websocketThreadFunc() {
           }
 
           ws->sendText(jsonStr);
-          if (hasFrame && !localJpeg.empty()) {
-            std::string binaryData(reinterpret_cast<char *>(localJpeg.data()),
-                                   localJpeg.size());
-            ws->sendBinary(binaryData);
-          }
           ++it;
         }
       }
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(33));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100)); // 10 FPS for JSON status
   }
 
   server.stop();

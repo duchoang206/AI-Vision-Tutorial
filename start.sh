@@ -10,8 +10,15 @@ echo "[Hệ thống] Đang khởi động Web Dashboard (Port 9000)..."
 python3 -m http.server 9000 --bind 0.0.0.0 > /dev/null 2>&1 &
 WEB_PID=$!
 
-# Đảm bảo Web Dashboard cũng tự động tắt khi bạn tắt AI Server bằng Ctrl+C
-trap "echo -e '\n[Hệ thống] Đang tắt Web Dashboard...'; kill $WEB_PID" EXIT
+echo "[Hệ thống] Đang kiểm tra và khởi động MediaMTX (Video Server)..."
+if [ ! -f "mediamtx" ]; then
+    python3 install_mediamtx.py
+fi
+./mediamtx > /dev/null 2>&1 &
+MTX_PID=$!
+
+# Đảm bảo Web Dashboard và MediaMTX tự động tắt khi bạn tắt AI Server bằng Ctrl+C
+trap "echo -e '\n[Hệ thống] Đang tắt Web Dashboard và MediaMTX...'; kill $WEB_PID; kill $MTX_PID" EXIT
 
 echo "[Hệ thống] Đang khởi động AI Edge Server..."
 ./build/DetectRackProject
