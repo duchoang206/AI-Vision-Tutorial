@@ -24,6 +24,9 @@ bool CameraStream::start() {
     } else {
         cap.open(videoSource);
     }
+    
+    // Đặt bộ đệm OpenCV = 1 để tránh tích tụ frame cũ khi chạy 24/7 (gây trễ hoặc đầy RAM)
+    cap.set(cv::CAP_PROP_BUFFERSIZE, 1);
 
     if (!cap.isOpened()) {
         std::cerr << "[CameraStream] Error: Could not open video source: " << videoSource << std::endl;
@@ -60,16 +63,48 @@ bool CameraStream::retrieveFrame(cv::Mat& frame) {
 
 void CameraStream::captureLoop() {
     cv::Mat tempFrame;
+    int failCount = 0;
     while (running) {
-        if (!cap.read(tempFrame)) {
-            std::cerr << "[CameraStream] Warning: Failed to grab frame. Reconnecting or ending..." << std::endl;
+        if (!cap.read(tempFrame) || tempFrame.empty()) {
+            failCount++;
+            std::cerr << "[CameraStream] Warning: Failed to grab frame. Fail count: " << failCount << std::endl;
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            
+            // Nếu mất kết nối quá 3 giây (30 frames x 100ms), thử kết nối lại
+            if (failCount > 30) {
+                std::cerr << "[CameraStream] Attempting to reconnect to stream..." << std::endl;
+                cap.release();
+                std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+                
+                bool isInt = true;
+                for (char c : videoSource) {
+                    if (c < '0' || c > '9') {
+                        isInt = false;
+                        break;
+                    }
+                }
+
+                if (isInt && !videoSource.empty()) {
+                    cap.open(std::stoi(videoSource));
+                } else {
+                    cap.open(videoSource);
+                }
+                
+                cap.set(cv::CAP_PROP_BUFFERSIZE, 1);
+                
+                if (cap.isOpened()) {
+                    std::cerr << "[CameraStream] Reconnected successfully." << std::endl;
+                    failCount = 0; // Đặt lại bộ đếm khi kết nối thành công
+                } else {
+                    std::cerr << "[CameraStream] Reconnect failed. Will try again." << std::endl;
+                    // Reset 1 phần failCount để không gọi release liên tục mà delay 3 giây nữa
+                    failCount = 0; 
+                }
+            }
             continue;
         }
 
-        if (tempFrame.empty()) {
-            continue;
-        }
+        failCount = 0;
 
         {
             std::lock_guard<std::mutex> lock(frameMutex);
